@@ -19,12 +19,98 @@ import {
   pageBackgroundClass,
 } from "./shared/appShared";
 
+function getNextStudentProfileId(list: StudentProfile[]) {
+  return list.reduce((max, item) => Math.max(max, item.id), 1000) + 1;
+}
+
+function toSessionStudent(profile: { id: number; name: string }) {
+  return {
+    id: profile.id,
+    name: profile.name,
+  };
+}
+
+function restorePersistedData() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+
+    const parsed = JSON.parse(saved);
+
+    const restoredStudents: StudentProfile[] =
+      Array.isArray(parsed.students) && parsed.students.length > 0
+        ? [...parsed.students]
+        : [...studentProfilesSeed];
+
+    const restoredSessions: Session[] = Array.isArray(parsed.sessions)
+      ? parsed.sessions
+      : [];
+
+    const normalizedStudents = [...restoredStudents];
+
+    const normalizedSessions = restoredSessions.map((session) => {
+      const rawName =
+        typeof session?.student?.name === "string"
+          ? session.student.name.trim()
+          : "";
+
+      let matchedStudent: StudentProfile | undefined;
+
+      if (session.studentId != null) {
+        matchedStudent = normalizedStudents.find(
+          (student) => student.id === session.studentId
+        );
+      }
+
+      if (!matchedStudent && rawName) {
+        matchedStudent = normalizedStudents.find(
+          (student) => student.name.trim() === rawName
+        );
+      }
+
+      if (!matchedStudent && rawName) {
+        const createdStudent: StudentProfile = {
+          id: getNextStudentProfileId(normalizedStudents),
+          name: rawName,
+          birthday: "",
+          school: "",
+          status: "active",
+        };
+        normalizedStudents.push(createdStudent);
+        matchedStudent = createdStudent;
+      }
+
+      if (!matchedStudent) {
+        return session;
+      }
+
+      return {
+        ...session,
+        studentId: matchedStudent.id,
+        student: toSessionStudent(matchedStudent),
+      };
+    });
+
+    return {
+      activeTab: parsed.activeTab,
+      selectedDate: parsed.selectedDate,
+      globalEvents: Array.isArray(parsed.globalEvents) ? parsed.globalEvents : [],
+      students: normalizedStudents,
+      sessions: normalizedSessions,
+    };
+  } catch (e) {
+    console.error("Restore persisted data failed", e);
+    return null;
+  }
+}
+
 export default function App() {
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     try { return localStorage.getItem('rollcall-theme') as 'light'|'dark' || 'light'; }
     catch { return 'light'; }
   });
   const isDark = theme === 'dark';
+  const restoredData = useMemo(() => restorePersistedData(), []);
   
   useEffect(() => {
     try {
@@ -34,48 +120,29 @@ export default function App() {
     }
   }, [theme]);
 
-const [activeTab, setActiveTab] = useState<TabKey>(() => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const nextTab = parsed.activeTab;
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const nextTab = restoredData?.activeTab;
 
-      if (
-        nextTab === "today" ||
-        nextTab === "month" ||
-        nextTab === "students" ||
-        nextTab === "data"
-      ) {
-        return nextTab;
-      }
+    if (
+      nextTab === "today" ||
+      nextTab === "month" ||
+      nextTab === "students" ||
+      nextTab === "data"
+    ) {
+      return nextTab;
     }
-  } catch (e) {
-    console.error("Restore tab failed", e);
-  }
-  return "today";
-});
 
-const [selectedDate, setSelectedDate] = useState<string>(() => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const nextDate = parsed.selectedDate;
+    return "today";
+  });
 
-      if (typeof nextDate === "string" && nextDate.trim()) {
-        return nextDate;
-      }
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const nextDate = restoredData?.selectedDate;
+
+    if (typeof nextDate === "string" && nextDate.trim()) {
+      return nextDate;
     }
-  } catch (e) {
-    console.error("Restore date failed", e);
-  }
-  return todayISO();
-});
 
-  const toSessionStudent = (profile: StudentProfile) => ({
-    id: profile.id,
-    name: profile.name,
+    return todayISO();
   });
 
   const [now, setNow] = useState<Date>(() => new Date());
@@ -86,13 +153,9 @@ const [selectedDate, setSelectedDate] = useState<string>(() => {
   }, []);
 
   const [sessions, setSessions] = useState<Session[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.sessions)) return parsed.sessions;
-      }
-    } catch (e) { console.error("Restore sessions failed", e); }
+    if (restoredData?.sessions && restoredData.sessions.length > 0) {
+      return restoredData.sessions;
+    }
 
     const d = todayISO();
     const studentA = studentProfilesSeed[0];
@@ -144,31 +207,21 @@ const [selectedDate, setSelectedDate] = useState<string>(() => {
     ];
   });
 
-const [globalEvents, setGlobalEvents] = useState<GlobalEvent[]>(() => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed.globalEvents)) return parsed.globalEvents;
+  const [globalEvents, setGlobalEvents] = useState<GlobalEvent[]>(() => {
+    if (restoredData?.globalEvents) {
+      return restoredData.globalEvents;
     }
-  } catch (e) {
-    console.error("Restore global events failed", e);
-  }
-  return [];
-});
 
-const [students, setStudents] = useState<StudentProfile[]>(() => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed.students)) return parsed.students;
+    return [];
+  });
+
+  const [students, setStudents] = useState<StudentProfile[]>(() => {
+    if (restoredData?.students && restoredData.students.length > 0) {
+      return restoredData.students;
     }
-  } catch (e) {
-    console.error("Restore students failed", e);
-  }
-  return studentProfilesSeed;
-});
+
+    return studentProfilesSeed;
+  });
 
 
   useEffect(() => {
