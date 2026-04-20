@@ -1,6 +1,12 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { Session, GlobalEvent, Reason, ClosureReason } from "../shared/appShared";
+import type {
+  Session,
+  GlobalEvent,
+  Reason,
+  ClosureReason,
+  StudentProfile,
+} from "../shared/appShared";
 import {
   ThemeContext,
   ThemeToggle,
@@ -11,7 +17,6 @@ import {
   IconPlus,
   reasonsSeed,
   closureReasonsSeed,
-  studentsSeed,
   todayISO,
   addDaysISO,
   formatZHDate,
@@ -40,6 +45,7 @@ export interface TodayPageProps {
   selectedDate: string;
   setSelectedDate: Dispatch<SetStateAction<string>>;
   now: Date;
+  students: StudentProfile[];
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
   globalEvents: GlobalEvent[];
@@ -52,6 +58,7 @@ export default function TodayPage({
   selectedDate,
   setSelectedDate,
   now,
+  students,
   sessions,
   setSessions,
   globalEvents,
@@ -59,6 +66,14 @@ export default function TodayPage({
   setToast
 }: TodayPageProps) {
   const isDark = useContext(ThemeContext);
+
+  function toSessionStudent(profile: { id: number; name: string }) {
+    return {
+      id: profile.id,
+      name: profile.name,
+    };
+  }
+
   const datePickerRef = useRef<HTMLInputElement>(null);
 
   const currentGlobalEvent = useMemo(() => {
@@ -131,7 +146,7 @@ export default function TodayPage({
   const deleteTarget = useMemo(() => sessions.find((x) => x.id === deleteId) ?? null, [sessions, deleteId]);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createStudentId, setCreateStudentId] = useState<number>(studentsSeed[0].id);
+  const [createStudentId, setCreateStudentId] = useState<number>(() => students[0]?.id ?? 0);
   const [createDate, setCreateDate] = useState<string>(selectedDate);
   const [createStart, setCreateStart] = useState<string>("10:00");
   const [createDuration, setCreateDuration] = useState<number>(60);
@@ -278,7 +293,8 @@ export default function TodayPage({
     
     const newSession: Session = {
       id: nextId,
-      student: selected.student,
+      studentId: selected.studentId,
+      student: toSessionStudent(selected.student),
       dateISO: mkDate,
       start: mkStart,
       durationMin: 60,
@@ -336,14 +352,15 @@ export default function TodayPage({
   }
 
   function handleCreateSession() {
-    const student = studentsSeed.find(s => s.id === createStudentId);
+    const student = students.find((s) => s.id === createStudentId);
     if (!student) return;
 
     const clamped = Math.min(120, Math.max(1, createDuration || 1));
     const nextId = getNextSessionId(sessions);
     const newSession: Session = {
       id: nextId,
-      student: student,
+      studentId: student.id,
+      student: toSessionStudent(student),
       dateISO: createDate,
       start: createStart,
       durationMin: clamped,
@@ -898,7 +915,7 @@ export default function TodayPage({
                 isDark ? 'bg-[#1C1C1E] border-white/10 text-[#F2F2F7] focus:ring-white/20' : 'bg-white border-[#E5E5EA] text-slate-800 focus:ring-[#C7DAFF]'
               }`}
             >
-              {studentsSeed.map(s => (
+              {students.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>

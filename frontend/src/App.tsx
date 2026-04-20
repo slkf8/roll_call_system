@@ -6,7 +6,6 @@ import type { TabKey, TabDef, Session, GlobalEvent,StudentProfile, } from "./sha
 import {
   STORAGE_KEY,
   ThemeContext,
-  studentsSeed,
   studentProfilesSeed,
   todayISO,
   addDaysISO,
@@ -74,6 +73,11 @@ const [selectedDate, setSelectedDate] = useState<string>(() => {
   return todayISO();
 });
 
+  const toSessionStudent = (profile: StudentProfile) => ({
+    id: profile.id,
+    name: profile.name,
+  });
+
   const [now, setNow] = useState<Date>(() => new Date());
 
   useEffect(() => {
@@ -91,13 +95,44 @@ const [selectedDate, setSelectedDate] = useState<string>(() => {
     } catch (e) { console.error("Restore sessions failed", e); }
 
     const d = todayISO();
+    const studentA = studentProfilesSeed[0];
+    const studentB = studentProfilesSeed[1];
+
     return [
-      { id: 2001, student: studentsSeed[0], dateISO: d, start: "14:00", durationMin: 60, status: "pending", kind: "regular" },
-      { id: 2002, student: studentsSeed[1], dateISO: d, start: "15:00", durationMin: 60, status: "pending", kind: "regular" },
-      { id: 2003, student: studentsSeed[2], dateISO: d, start: "16:00", durationMin: 60, status: "pending", kind: "regular" },
+      {
+        id: 2001,
+        studentId: studentA.id,
+        student: toSessionStudent(studentA),
+        dateISO: d,
+        start: "14:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "regular",
+      },
+      {
+        id: 2002,
+        studentId: studentB.id,
+        student: toSessionStudent(studentB),
+        dateISO: d,
+        start: "15:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "regular",
+      },
+      {
+        id: 2003,
+        studentId: studentA.id,
+        student: toSessionStudent(studentA),
+        dateISO: d,
+        start: "16:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "regular",
+      },
       {
         id: 2004,
-        student: studentsSeed[3],
+        studentId: studentB.id,
+        student: toSessionStudent(studentB),
         dateISO: d,
         start: "17:00",
         durationMin: 60,
@@ -202,6 +237,7 @@ const [students, setStudents] = useState<StudentProfile[]>(() => {
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
               now={now}
+              students={students}
               sessions={sessions}
               setSessions={setSessions}
               globalEvents={globalEvents}

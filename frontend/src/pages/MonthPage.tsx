@@ -38,6 +38,7 @@ export interface MakeupDraft {
   dateISO: string;
   start: string;
   durationMin: number;
+  studentId?: Session["studentId"];
   student: Session["student"];
   status: Session["status"];
   kind: Session["kind"];
@@ -326,6 +327,7 @@ const calculateDayConflicts = (
       dateISO: drawerDate || selectedDate,
       start: endTime(session),
       durationMin: 60,
+      studentId: session.studentId,
       student: session.student,
       status: "pending",
       kind: isMakeup ? "makeup" : "extra",
@@ -368,6 +370,7 @@ const calculateDayConflicts = (
 
       const newSession: Session = {
         id: getNextSessionId(safePrev),
+        studentId: sheetMakeupFor.studentId,
         student: sheetMakeupFor.student,
         dateISO: mkDate,
         start: mkStart,

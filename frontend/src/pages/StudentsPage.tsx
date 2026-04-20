@@ -362,6 +362,8 @@ export default function StudentsPage({
             : item
         )
       );
+
+      setToast?.("已取消停用設定，先前已移除的課次不會自動恢復");
       return;
     }
 
