@@ -1,6 +1,6 @@
 import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { Session, StudentProfile } from "../shared/appShared";
+import type { Session, StudentProfile, StudentScheduleRule } from "../shared/appShared";
 import {
   studentProfilesSeed,
   todayISO,
@@ -9,12 +9,14 @@ import {
   SegmentedControl,
   IOSSheet,
   FieldRow,
+  DurationInput,
   Menu,
   IconUsers,
 } from "../shared/appShared";
 
 type StudentFilter = "all" | "active" | "scheduled_deactivation" | "inactive";
 type EditorMode = "create" | "edit";
+type RuleEditorMode = "create" | "edit";
 
 type PendingAction =
   | { kind: "deactivate_immediate"; student: StudentProfile }
@@ -28,9 +30,19 @@ type DraftStudent = {
   school: string;
 };
 
+type RuleDraft = {
+  weekday: StudentScheduleRule["weekday"];
+  start: string;
+  durationMin: number;
+  isActive: boolean;
+};
+
 type StudentsPageProps = {
+  selectedDate?: string;
   students?: StudentProfile[];
   setStudents?: Dispatch<SetStateAction<StudentProfile[]>>;
+  studentScheduleRules?: StudentScheduleRule[];
+  setStudentScheduleRules?: Dispatch<SetStateAction<StudentScheduleRule[]>>;
   sessions?: Session[];
   setSessions?: Dispatch<SetStateAction<Session[]>>;
   setToast?: Dispatch<SetStateAction<string>>;
@@ -42,6 +54,75 @@ function cx(...parts: Array<string | false | null | undefined>) {
 
 function getNextStudentId(list: StudentProfile[]) {
   return list.reduce((max, item) => Math.max(max, item.id), 1000) + 1;
+}
+
+function getNextRuleId(list: StudentScheduleRule[]) {
+  return list.reduce((max, item) => Math.max(max, item.id), 0) + 1;
+}
+
+function getNextSessionId(list: Session[]) {
+  return list.reduce((max, item) => Math.max(max, item.id), 0) + 1;
+}
+
+function toSessionStudent(profile: { id: number; name: string }) {
+  return {
+    id: profile.id,
+    name: profile.name,
+  };
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDateISO(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function getMonthRemainingDates(anchorISO: string) {
+  const [year, month, day] = anchorISO.split("-").map((item) => Number(item));
+  if (!year || !month || !day) return [];
+
+  const cursor = new Date(year, month - 1, day);
+  if (Number.isNaN(cursor.getTime())) return [];
+
+  const dates: Array<{ date: Date; dateISO: string }> = [];
+  const targetMonth = cursor.getMonth();
+
+  while (cursor.getMonth() === targetMonth) {
+    dates.push({
+      date: new Date(cursor),
+      dateISO: formatDateISO(cursor),
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function isWithinMonthRemaining(dateISO: string, anchorISO: string) {
+  const [year, month, day] = anchorISO.split("-").map((item) => Number(item));
+  if (!year || !month || !day) return false;
+
+  const endOfMonth = new Date(year, month, 0);
+  const endISO = formatDateISO(endOfMonth);
+  const monthPrefix = `${year}-${pad2(month)}-`;
+
+  return dateISO.startsWith(monthPrefix) && dateISO >= anchorISO && dateISO <= endISO;
+}
+
+function formatWeekdayLabel(weekday: StudentScheduleRule["weekday"]) {
+  const labels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"] as const;
+  return labels[weekday];
+}
+
+function createDefaultRuleDraft(): RuleDraft {
+  return {
+    weekday: 1,
+    start: "16:00",
+    durationMin: 60,
+    isActive: true,
+  };
 }
 
 function formatStatus(status: StudentProfile["status"]) {
@@ -99,8 +180,11 @@ function statusDescription(student: StudentProfile) {
 }
 
 export default function StudentsPage({
+  selectedDate,
   students,
   setStudents,
+  studentScheduleRules,
+  setStudentScheduleRules,
   sessions,
   setSessions,
   setToast,
@@ -108,9 +192,12 @@ export default function StudentsPage({
   const isDark = useContext(ThemeContext);
 
   const [localStudents, setLocalStudents] = useState<StudentProfile[]>(studentProfilesSeed);
+  const [localRules, setLocalRules] = useState<StudentScheduleRule[]>([]);
 
   const safeStudents = students ?? localStudents;
   const safeSetStudents = setStudents ?? setLocalStudents;
+  const safeRules = studentScheduleRules ?? localRules;
+  const safeSetRules = setStudentScheduleRules ?? setLocalRules;
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StudentFilter>("all");
@@ -134,6 +221,13 @@ export default function StudentsPage({
   const [scheduledDateError, setScheduledDateError] = useState("");
 
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+  const [ruleEditorOpen, setRuleEditorOpen] = useState(false);
+  const [ruleEditorMode, setRuleEditorMode] = useState<RuleEditorMode>("create");
+  const [editingRule, setEditingRule] = useState<StudentScheduleRule | null>(null);
+  const [ruleOwnerStudent, setRuleOwnerStudent] = useState<StudentProfile | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<RuleDraft>(createDefaultRuleDraft());
+  const [ruleDeleteTarget, setRuleDeleteTarget] = useState<StudentScheduleRule | null>(null);
+  const [ruleDeleteOpen, setRuleDeleteOpen] = useState(false);
 
   const todayStr = todayISO();
 
@@ -215,6 +309,293 @@ export default function StudentsPage({
     return impacted;
   }
 
+  function getRulesForStudent(studentId: number) {
+    return safeRules
+      .filter((rule) => rule.studentId === studentId)
+      .slice()
+      .sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start));
+  }
+
+  function buildRegularSessionsForStudent(
+    student: StudentProfile,
+    activeRules: StudentScheduleRule[],
+    baseSessions: Session[],
+    anchorISO: string
+  ) {
+    const dates = getMonthRemainingDates(anchorISO);
+    const existingRegularKeys = new Set(
+      baseSessions
+        .filter((session) => session.kind === "regular")
+        .map(
+          (session) =>
+            `${session.studentId ?? ""}|${session.dateISO}|${session.start}|${session.kind}`
+        )
+    );
+
+    let nextId = getNextSessionId(baseSessions);
+    let skippedCount = 0;
+    const generatedSessions: Session[] = [];
+
+    for (const rule of activeRules) {
+      for (const target of dates) {
+        if (target.date.getDay() !== rule.weekday) continue;
+
+        const key = `${student.id}|${target.dateISO}|${rule.start}|regular`;
+        if (existingRegularKeys.has(key)) {
+          skippedCount++;
+          continue;
+        }
+
+        existingRegularKeys.add(key);
+        generatedSessions.push({
+          id: nextId,
+          studentId: student.id,
+          student: toSessionStudent(student),
+          dateISO: target.dateISO,
+          start: rule.start,
+          durationMin: rule.durationMin,
+          status: "pending",
+          kind: "regular",
+        });
+        nextId++;
+      }
+    }
+
+    return {
+      generatedSessions,
+      skippedCount,
+    };
+  }
+
+  function generateRegularSessionsForStudent(student: StudentProfile) {
+    if (student.status !== "active") {
+      setToast?.("只有啟用中的學生可生成 regular 課次");
+      return;
+    }
+
+    const activeRules = safeRules.filter(
+      (rule) => rule.studentId === student.id && rule.isActive
+    );
+
+    if (activeRules.length === 0) {
+      setToast?.("此學生沒有可用的固定課表規則");
+      return;
+    }
+
+    if (!selectedDate) {
+      setToast?.("缺少月份資訊，無法生成 regular 課次");
+      return;
+    }
+
+    if (!setSessions) {
+      setToast?.("缺少課次資料，無法生成 regular 課次");
+      return;
+    }
+
+    const currentSessions = sessions ?? [];
+    const { generatedSessions, skippedCount } = buildRegularSessionsForStudent(
+      student,
+      activeRules,
+      currentSessions,
+      selectedDate
+    );
+
+    if (generatedSessions.length === 0) {
+      setToast?.("本月剩餘日期沒有可新增的 regular 課次");
+      return;
+    }
+
+    setSessions((current) => [...current, ...generatedSessions]);
+
+    if (skippedCount > 0) {
+      setToast?.(`已生成 ${generatedSessions.length} 堂 regular 課次，略過 ${skippedCount} 堂已存在課次`);
+    } else {
+      setToast?.(`已生成 ${generatedSessions.length} 堂 regular 課次`);
+    }
+  }
+
+  function clearRemainingRegularSessionsForStudent(student: StudentProfile) {
+    if (!selectedDate) {
+      setToast?.("缺少月份資訊，無法清除 regular 課次");
+      return;
+    }
+
+    if (!sessions || !setSessions) {
+      setToast?.("缺少課次資料，無法清除 regular 課次");
+      return;
+    }
+
+    const removedCount = sessions.filter(
+      (session) =>
+        session.studentId === student.id &&
+        session.kind === "regular" &&
+        isWithinMonthRemaining(session.dateISO, selectedDate)
+    ).length;
+
+    if (removedCount === 0) {
+      setToast?.("本月剩餘日期沒有可清除的 regular 課次");
+      return;
+    }
+
+    setSessions((current) =>
+      current.filter(
+        (session) =>
+          !(
+            session.studentId === student.id &&
+            session.kind === "regular" &&
+            isWithinMonthRemaining(session.dateISO, selectedDate)
+          )
+      )
+    );
+
+    setToast?.(`已清除 ${removedCount} 堂 regular 課次`);
+  }
+
+  function regenerateRegularSessionsForStudent(student: StudentProfile) {
+    if (student.status !== "active") {
+      setToast?.("只有啟用中的學生可生成 regular 課次");
+      return;
+    }
+
+    const activeRules = safeRules.filter(
+      (rule) => rule.studentId === student.id && rule.isActive
+    );
+
+    if (activeRules.length === 0) {
+      setToast?.("本月剩餘日期沒有可重新生成的 regular 課次");
+      return;
+    }
+
+    if (!selectedDate) {
+      setToast?.("缺少月份資訊，無法生成 regular 課次");
+      return;
+    }
+
+    if (!setSessions) {
+      setToast?.("缺少課次資料，無法生成 regular 課次");
+      return;
+    }
+
+    const baseSessions = sessions ?? [];
+    const keptSessions = baseSessions.filter(
+      (session) =>
+        !(
+          session.studentId === student.id &&
+          session.kind === "regular" &&
+          isWithinMonthRemaining(session.dateISO, selectedDate)
+        )
+    );
+
+    const { generatedSessions } = buildRegularSessionsForStudent(
+      student,
+      activeRules,
+      keptSessions,
+      selectedDate
+    );
+
+    if (generatedSessions.length === 0) {
+      setToast?.("本月剩餘日期沒有可重新生成的 regular 課次");
+      return;
+    }
+
+    setSessions([...keptSessions, ...generatedSessions]);
+    setToast?.(`已重新生成 ${generatedSessions.length} 堂 regular 課次`);
+  }
+
+  function closeRuleEditor() {
+    setRuleEditorOpen(false);
+    setRuleEditorMode("create");
+    setEditingRule(null);
+    setRuleOwnerStudent(null);
+    setRuleDraft(createDefaultRuleDraft());
+  }
+
+  function openRuleCreateSheet(student: StudentProfile) {
+    setRuleEditorMode("create");
+    setEditingRule(null);
+    setRuleOwnerStudent(student);
+    setRuleDraft(createDefaultRuleDraft());
+    setRuleEditorOpen(true);
+  }
+
+  function openRuleEditSheet(student: StudentProfile, rule: StudentScheduleRule) {
+    setRuleEditorMode("edit");
+    setEditingRule(rule);
+    setRuleOwnerStudent(student);
+    setRuleDraft({
+      weekday: rule.weekday,
+      start: rule.start,
+      durationMin: rule.durationMin,
+      isActive: rule.isActive,
+    });
+    setRuleEditorOpen(true);
+  }
+
+  function saveRuleDraft() {
+    if (!ruleOwnerStudent || !ruleDraft.start.trim() || ruleDraft.durationMin <= 0) {
+      setToast?.("請輸入有效的上課時間與時長");
+      return;
+    }
+
+    if (ruleEditorMode === "create") {
+      safeSetRules((current) => [
+        ...current,
+        {
+          id: getNextRuleId(current),
+          studentId: ruleOwnerStudent.id,
+          weekday: ruleDraft.weekday,
+          start: ruleDraft.start,
+          durationMin: ruleDraft.durationMin,
+          isActive: ruleDraft.isActive,
+        },
+      ]);
+      setToast?.("已新增固定課表規則");
+    } else if (editingRule) {
+      safeSetRules((current) =>
+        current.map((item) =>
+          item.id === editingRule.id
+            ? {
+                ...item,
+                studentId: ruleOwnerStudent.id,
+                weekday: ruleDraft.weekday,
+                start: ruleDraft.start,
+                durationMin: ruleDraft.durationMin,
+                isActive: ruleDraft.isActive,
+              }
+            : item
+        )
+      );
+      setToast?.("已更新固定課表規則");
+    }
+
+    closeRuleEditor();
+  }
+
+  function toggleRuleActive(rule: StudentScheduleRule, isActive: boolean) {
+    safeSetRules((current) =>
+      current.map((item) => (item.id === rule.id ? { ...item, isActive } : item))
+    );
+    setToast?.(isActive ? "已恢復固定課表規則" : "已停用固定課表規則");
+  }
+
+  function openRuleDeleteSheet(rule: StudentScheduleRule) {
+    setRuleDeleteTarget(rule);
+    setRuleDeleteOpen(true);
+  }
+
+  function closeRuleDeleteSheet() {
+    setRuleDeleteTarget(null);
+    setRuleDeleteOpen(false);
+  }
+
+  function confirmRuleDelete() {
+    if (!ruleDeleteTarget) return;
+
+    safeSetRules((current) => current.filter((item) => item.id !== ruleDeleteTarget.id));
+    setToast?.("已刪除固定課表規則");
+    closeRuleDeleteSheet();
+  }
+
   function closeDuplicateSheet() {
     setDuplicateOpen(false);
     setDuplicateList([]);
@@ -262,6 +643,14 @@ export default function StudentsPage({
   const dangerButtonClass = isDark
     ? "rounded-full bg-red-500/12 px-4 py-2.5 text-[14px] font-medium text-red-300 transition hover:bg-red-500/18"
     : "rounded-full bg-red-500/10 px-4 py-2.5 text-[14px] font-medium text-red-600 transition hover:bg-red-500/15";
+
+  const compactButtonClass = isDark
+    ? "rounded-full bg-[#2C2C2E] px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-[#3A3A3C]"
+    : "rounded-full bg-[#F2F2F7] px-3 py-1.5 text-[12px] font-medium text-[#1C1C1E] ring-1 ring-[#E5E5EA] transition hover:bg-[#EAEAEE]";
+
+  const compactDangerButtonClass = isDark
+    ? "rounded-full bg-red-500/12 px-3 py-1.5 text-[12px] font-medium text-red-300 transition hover:bg-red-500/18"
+    : "rounded-full bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-600 transition hover:bg-red-500/15";
 
   function openCreateSheet() {
     setEditorMode("create");
@@ -722,6 +1111,124 @@ export default function StudentsPage({
                       />
                     </div>
                   </div>
+
+                  <div
+                    className={cx(
+                      "border-t px-4 py-4",
+                      isDark ? "border-white/10" : "border-[#E5E5EA]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[13px] font-medium text-[#8E8E93]">固定課表</div>
+                        <div className="mt-1 text-[13px] text-[#8E8E93]">
+                          共 {getRulesForStudent(student.id).length} 條規則
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => generateRegularSessionsForStudent(student)}
+                          className={compactButtonClass}
+                        >
+                          生成本月 regular 課次
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clearRemainingRegularSessionsForStudent(student)}
+                          className={compactDangerButtonClass}
+                        >
+                          清除本月 regular
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => regenerateRegularSessionsForStudent(student)}
+                          className={compactButtonClass}
+                        >
+                          重新生成本月 regular
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openRuleCreateSheet(student)}
+                          className={compactButtonClass}
+                        >
+                          新增固定課表
+                        </button>
+                      </div>
+                    </div>
+
+                    {getRulesForStudent(student.id).length === 0 ? (
+                      <div className="mt-4 text-[13px] leading-6 text-[#8E8E93]">
+                        尚未設定固定課表規則。
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        {getRulesForStudent(student.id).map((rule) => (
+                          <div
+                            key={rule.id}
+                            className={cx(
+                              "rounded-2xl px-4 py-3 ring-1",
+                              isDark
+                                ? "bg-[#2C2C2E] ring-white/10"
+                                : "bg-[#F2F2F7] ring-[#E5E5EA]"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-[14px] font-semibold">
+                                    {formatWeekdayLabel(rule.weekday)}
+                                  </div>
+                                  <div className="text-[13px] text-[#8E8E93]">{rule.start}</div>
+                                  <div className="text-[13px] text-[#8E8E93]">
+                                    {rule.durationMin} 分鐘
+                                  </div>
+                                  <span
+                                    className={cx(
+                                      "rounded-full px-2.5 py-1 text-[11px] font-medium",
+                                      rule.isActive
+                                        ? isDark
+                                          ? "bg-[#0A84FF]/16 text-[#4DA3FF] ring-1 ring-[#0A84FF]/25"
+                                          : "bg-[#007AFF]/10 text-[#007AFF] ring-1 ring-[#007AFF]/15"
+                                        : isDark
+                                        ? "bg-[#3A3A3C] text-[#8E8E93] ring-1 ring-white/10"
+                                        : "bg-[#E5E5EA] text-[#636366] ring-1 ring-[#D1D1D6]"
+                                    )}
+                                  >
+                                    {rule.isActive ? "啟用中" : "已停用"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openRuleEditSheet(student, rule)}
+                                  className={compactButtonClass}
+                                >
+                                  編輯
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRuleActive(rule, !rule.isActive)}
+                                  className={compactButtonClass}
+                                >
+                                  {rule.isActive ? "停用" : "恢復"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openRuleDeleteSheet(rule)}
+                                  className={compactDangerButtonClass}
+                                >
+                                  刪除
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -885,11 +1392,112 @@ export default function StudentsPage({
             <div className="p-4">
               <div className="mb-2 text-[16px] font-semibold">固定課表規則</div>
               <div className="text-[14px] leading-6 text-[#8E8E93]">
-                第二階段開放，用於設定固定課表並生成 regular 課次。
+                規則請於學生卡片下方管理；regular 課次自動生成將於後續階段開放。
               </div>
             </div>
           </div>
         </div>
+      </IOSSheet>
+
+      <IOSSheet
+        open={ruleEditorOpen}
+        title={ruleEditorMode === "create" ? "新增固定課表" : "編輯固定課表"}
+        subtitle={ruleOwnerStudent ? `${ruleOwnerStudent.name} · 固定課表規則` : "固定課表規則"}
+        onClose={closeRuleEditor}
+        leftAction={{ label: "取消", onClick: closeRuleEditor }}
+        rightAction={{
+          label: "儲存",
+          onClick: saveRuleDraft,
+          emphasize: true,
+        }}
+      >
+        <div className="space-y-5">
+          <div className={cardClass}>
+            <div className="p-4">
+              <div className="mb-4 text-[16px] font-semibold">規則設定</div>
+              <div className="grid gap-4">
+                <FieldRow label="星期">
+                  <div className="w-full text-left">
+                    <select
+                      value={ruleDraft.weekday}
+                      onChange={(e) =>
+                        setRuleDraft((prev) => ({
+                          ...prev,
+                          weekday: Number(e.target.value) as StudentScheduleRule["weekday"],
+                        }))
+                      }
+                      className={inputClass}
+                    >
+                      {[0, 1, 2, 3, 4, 5, 6].map((weekday) => (
+                        <option key={weekday} value={weekday}>
+                          {formatWeekdayLabel(weekday as StudentScheduleRule["weekday"])}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </FieldRow>
+
+                <FieldRow label="開始時間">
+                  <div className="w-full text-left">
+                    <input
+                      type="time"
+                      value={ruleDraft.start}
+                      onChange={(e) =>
+                        setRuleDraft((prev) => ({ ...prev, start: e.target.value }))
+                      }
+                      className={inputClass}
+                    />
+                  </div>
+                </FieldRow>
+
+                <FieldRow label="時長">
+                  <DurationInput
+                    value={ruleDraft.durationMin}
+                    onChange={(value) =>
+                      setRuleDraft((prev) => ({ ...prev, durationMin: value }))
+                    }
+                  />
+                </FieldRow>
+
+                <FieldRow label="狀態">
+                  <input
+                    type="text"
+                    readOnly
+                    value={ruleDraft.isActive ? "啟用中" : "已停用"}
+                    className={cx(inputClass, "opacity-80")}
+                  />
+                </FieldRow>
+              </div>
+            </div>
+          </div>
+        </div>
+      </IOSSheet>
+
+      <IOSSheet
+        open={ruleDeleteOpen}
+        title="刪除固定課表規則"
+        subtitle="請確認是否刪除這條固定課表規則。"
+        onClose={closeRuleDeleteSheet}
+        leftAction={{ label: "取消", onClick: closeRuleDeleteSheet }}
+        rightAction={{
+          label: "確認刪除",
+          onClick: confirmRuleDelete,
+          danger: true,
+        }}
+      >
+        {ruleDeleteTarget ? (
+          <div className="space-y-4">
+            <div className={cardClass}>
+              <div className="p-4">
+                <div className="space-y-2 text-[14px] leading-6 text-[#8E8E93]">
+                  <div>星期：{formatWeekdayLabel(ruleDeleteTarget.weekday)}</div>
+                  <div>開始時間：{ruleDeleteTarget.start}</div>
+                  <div>時長：{ruleDeleteTarget.durationMin} 分鐘</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </IOSSheet>
 
       <IOSSheet

@@ -4,7 +4,12 @@ import type { Dispatch, SetStateAction } from "react";
 // ==========================================
 // 匯入 Shared 層內容 (對齊現有專案結構)
 // ==========================================
-import type { Session, GlobalEvent, ClosureReason } from "../shared/appShared";
+import type {
+  Session,
+  GlobalEvent,
+  ClosureReason,
+  StudentProfile,
+} from "../shared/appShared";
 import {
   ThemeContext,
   IconChevronLeft,
@@ -21,6 +26,7 @@ import {
   formatConflictSummary,
   getEffectiveStatus,
   getNextSessionId,
+  getSessionStudentName,
   getConflictCandidates,
   reasonsSeed,
   closureReasonsSeed,
@@ -50,6 +56,7 @@ export interface MonthPageProps {
   setTheme: Dispatch<SetStateAction<"light" | "dark">>;
   selectedDate: string;
   setSelectedDate: Dispatch<SetStateAction<string>>;
+  students: StudentProfile[];
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
   globalEvents: GlobalEvent[];
@@ -130,6 +137,7 @@ export default function MonthPage({
   setTheme,
   selectedDate,
   setSelectedDate,
+  students,
   sessions,
   setSessions,
   globalEvents,
@@ -184,6 +192,10 @@ export default function MonthPage({
   // 安全陣列確保不會因為 undefined crash
   const safeSessions = sessions || [];
   const safeEvents = globalEvents || [];
+  const schedulableStudentIds = useMemo(
+    () => new Set(students.filter((s) => s.status !== "inactive").map((s) => s.id)),
+    [students]
+  );
 
   // --- Drawer 單日事件管理狀態 ---
   const [drawerGlobalSheetOpen, setDrawerGlobalSheetOpen] = useState(false);
@@ -321,6 +333,11 @@ const calculateDayConflicts = (
   }
 
   function openMakeupFromMenu(session: Session, purpose: "makeup" | "extra") {
+    if (session.studentId == null || !schedulableStudentIds.has(session.studentId)) {
+      setToast("已停用學生不可安排補課或加課");
+      return;
+    }
+
     const isMakeup = purpose === "makeup";
 
     setSheetMakeupFor({
@@ -364,6 +381,14 @@ const calculateDayConflicts = (
   const handleMakeupSubmit = () => {
     if (!sheetMakeupFor) return;
 
+    if (
+      sheetMakeupFor.studentId == null ||
+      !schedulableStudentIds.has(sheetMakeupFor.studentId)
+    ) {
+      setToast("已停用學生不可安排補課或加課");
+      return;
+    }
+
     setSessions((prev) => {
       const safePrev = prev || [];
       const isMakeup = mkPurpose === "makeup";
@@ -371,7 +396,10 @@ const calculateDayConflicts = (
       const newSession: Session = {
         id: getNextSessionId(safePrev),
         studentId: sheetMakeupFor.studentId,
-        student: sheetMakeupFor.student,
+        student: {
+          id: sheetMakeupFor.student?.id ?? 0,
+          name: getSessionStudentName(sheetMakeupFor),
+        },
         dateISO: mkDate,
         start: mkStart,
         durationMin: sheetMakeupFor.durationMin,
@@ -1331,8 +1359,8 @@ const handleBatchClearHoliday = () => {
 
                                   setToast(
                                     nextStatus === "cancelled"
-                                      ? `已將 ${session.student.name} ${session.start} 標記為單堂停課`
-                                      : `已取消 ${session.student.name} ${session.start} 的單堂停課`
+                                      ? `已將 ${getSessionStudentName(session)} ${session.start} 標記為單堂停課`
+                                      : `已取消 ${getSessionStudentName(session)} ${session.start} 的單堂停課`
                                   );
                                 },
                               },
@@ -1560,7 +1588,7 @@ const handleBatchClearHoliday = () => {
         title="請假 / 缺席"
         subtitle={
           absentTarget
-            ? `${absentTarget.student.name} · ${absentTarget.dateISO} · ${absentTarget.start}–${endTime(absentTarget)}`
+            ? `${getSessionStudentName(absentTarget)} · ${absentTarget.dateISO} · ${absentTarget.start}–${endTime(absentTarget)}`
             : undefined
         }
         onClose={() => setSheetAbsentFor(null)}
@@ -1593,7 +1621,7 @@ const handleBatchClearHoliday = () => {
                       reason: r,
                       note: absentNote || undefined,
                     });
-                    setToast(`${absentTarget.student.name} ${absentTarget.start} 缺席：${r.name}`);
+                    setToast(`${getSessionStudentName(absentTarget)} ${absentTarget.start} 缺席：${r.name}`);
                     setSheetAbsentFor(null);
                   }}
                   className={`rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
@@ -1616,7 +1644,7 @@ const handleBatchClearHoliday = () => {
         <IOSSheet
           open={!!sheetEditFor}
           title="編輯課次"
-          subtitle={`${sheetEditFor.student.name} · ${sheetEditFor.dateISO}`}
+          subtitle={`${getSessionStudentName(sheetEditFor)} · ${sheetEditFor.dateISO}`}
           onClose={() => setSheetEditFor(null)}
           leftAction={{ label: "取消", onClick: () => setSheetEditFor(null) }}
           rightAction={{ label: "完成", onClick: handleEditSubmit, emphasize: true }}
@@ -1671,7 +1699,7 @@ const handleBatchClearHoliday = () => {
         <IOSSheet
           open={!!sheetMakeupFor}
           title={mkPurpose === "makeup" ? "安排補課" : "安排加課"}
-          subtitle={`${sheetMakeupFor.student.name} · 原課 ${sheetMakeupFor.dateISO} ${sheetMakeupFor.start}–${endTime({
+          subtitle={`${getSessionStudentName(sheetMakeupFor)} · 原課 ${sheetMakeupFor.dateISO} ${sheetMakeupFor.start}–${endTime({
             ...sheetMakeupFor,
             id: 0,
           } as Session)}`}
@@ -1734,7 +1762,7 @@ const handleBatchClearHoliday = () => {
         <IOSSheet
           open={!!sheetDeleteFor}
           title="刪除課次"
-          subtitle={`確認要刪除 ${sheetDeleteFor.student.name} 的課次嗎？`}
+          subtitle={`確認要刪除 ${getSessionStudentName(sheetDeleteFor)} 的課次嗎？`}
           rightAction={{ label: "刪除", danger: true, onClick: handleDeleteSubmit }}
           onClose={() => setSheetDeleteFor(null)}
         >

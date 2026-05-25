@@ -73,6 +73,15 @@ export type StudentProfile = {
   deactivateOn?: string; // YYYY-MM-DD
 };
 
+export type StudentScheduleRule = {
+  id: number;
+  studentId: number;
+  weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  start: string; // HH:MM
+  durationMin: number;
+  isActive: boolean;
+};
+
 // --- Data Seeds ---
 
 export const reasonsSeed: Reason[] = [
@@ -109,13 +118,36 @@ export const studentProfilesSeed: StudentProfile[] = [
   },
   {
     id: 1003,
-    name: "陳小明",
+    name: "王家朗",
     birthday: "2012-03-08",
     school: "澳門坊眾學校",
     status: "inactive",
     deactivateMode: "immediate",
   },
+  {
+    id: 1004,
+    name: "林雅婷",
+    birthday: "2012-06-14",
+    school: "培道中學",
+    status: "active",
+  },
+  {
+    id: 1005,
+    name: "王大文",
+    birthday: "2011-09-03",
+    school: "濠江中學",
+    status: "active",
+  },
+  {
+    id: 1006,
+    name: "張小美",
+    birthday: "2012-12-19",
+    school: "嘉諾撒聖心中學",
+    status: "active",
+  },
 ];
+
+export const studentScheduleRulesSeed: StudentScheduleRule[] = [];
 
 export const STORAGE_KEY = "attendance_v1_data";
 export const ThemeContext = React.createContext(false); // isDark context
@@ -190,6 +222,10 @@ export function getNextSessionId(sessions: Session[]): number {
   return sessions.reduce((max, s) => Math.max(max, s.id), 0) + 1;
 }
 
+export function getSessionStudentName(session: Pick<Session, "student"> | null | undefined) {
+  return session?.student?.name?.trim() || "未關聯學生";
+}
+
 export function checkOverlap(
   a: { start: string; durationMin: number },
   b: { start: string; durationMin: number }
@@ -204,7 +240,7 @@ export function checkOverlap(
 export function formatConflictSummary(conflicts: Session[]) {
   if (conflicts.length === 0) return "";
   const sorted = [...conflicts].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-  const names = sorted.slice(0, 2).map(c => `「${c.student.name}」`);
+  const names = sorted.slice(0, 2).map(c => `「${getSessionStudentName(c)}」`);
   if (sorted.length > 2) {
     return `⚠️ 與${names.join("、")}等 ${sorted.length} 堂衝突`;
   }
@@ -782,7 +818,7 @@ export function SessionCard({
                 補課（原 {s.makeupOfDateISO}）
               </Pill>
             ) : null}
-            <div className={`text-[20px] font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.student.name}</div>
+            <div className={`text-[20px] font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{getSessionStudentName(s)}</div>
             <div className={`mt-1 text-sm ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>
               {formatDurationMin(s.durationMin)}
               <span className={isDark ? 'text-[#3A3A3C]' : 'text-slate-300'}> · </span>

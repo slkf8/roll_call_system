@@ -2,15 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import TodayPage from "./pages/TodayPage";
 import MonthPage from "./pages/MonthPage";
 import StudentsPage from "./pages/StudentsPage";
-import type { TabKey, TabDef, Session, GlobalEvent,StudentProfile, } from "./shared/appShared";
+import DataPage from "./pages/DataPage";
+import type {
+  TabKey,
+  TabDef,
+  Session,
+  GlobalEvent,
+  StudentProfile,
+  StudentScheduleRule,
+} from "./shared/appShared";
 import {
   STORAGE_KEY,
   ThemeContext,
   studentProfilesSeed,
+  studentScheduleRulesSeed,
   todayISO,
   addDaysISO,
   BottomTabBar,
-  HeaderBar,
   Toast,
   IconToday,
   IconMonth,
@@ -19,15 +27,238 @@ import {
   pageBackgroundClass,
 } from "./shared/appShared";
 
-function getNextStudentProfileId(list: StudentProfile[]) {
-  return list.reduce((max, item) => Math.max(max, item.id), 1000) + 1;
-}
-
 function toSessionStudent(profile: { id: number; name: string }) {
   return {
     id: profile.id,
     name: profile.name,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isValidDateISO(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
+function normalizeHHMM(value: unknown, fallback: string) {
+  return typeof value === "string" && /^\d{2}:\d{2}$/.test(value) ? value : fallback;
+}
+
+function normalizeStudentStatus(value: unknown): StudentProfile["status"] {
+  return value === "active" || value === "scheduled_deactivation" || value === "inactive"
+    ? value
+    : "active";
+}
+
+function normalizeSessionStatus(value: unknown): Session["status"] {
+  return value === "pending" || value === "present" || value === "absent" || value === "cancelled"
+    ? value
+    : "pending";
+}
+
+function normalizeSessionKind(value: unknown): Session["kind"] {
+  return value === "regular" || value === "makeup" || value === "extra" ? value : "regular";
+}
+
+function normalizePersistedStudent(value: unknown, fallbackId: number): StudentProfile {
+  const item = isRecord(value) ? value : {};
+  const status = normalizeStudentStatus(item.status);
+  const deactivateMode =
+    item.deactivateMode === "immediate" || item.deactivateMode === "scheduled"
+      ? item.deactivateMode
+      : undefined;
+
+  return {
+    id: typeof item.id === "number" ? item.id : fallbackId,
+    name: typeof item.name === "string" ? item.name : "未命名學生",
+    birthday: typeof item.birthday === "string" ? item.birthday : "",
+    school: typeof item.school === "string" ? item.school : "",
+    status,
+    deactivateMode,
+    deactivateOn: isValidDateISO(item.deactivateOn) ? item.deactivateOn : undefined,
+  };
+}
+
+function getSafeSessionStudentSnapshot(
+  session: Partial<Session>,
+  students: StudentProfile[]
+) {
+  if (session.studentId != null) {
+    const linkedStudent = students.find((student) => student.id === session.studentId);
+    if (linkedStudent) return toSessionStudent(linkedStudent);
+  }
+
+  const rawStudent = session.student as Partial<Session["student"]> | undefined;
+  const rawName = typeof rawStudent?.name === "string" ? rawStudent.name.trim() : "";
+  const rawId = typeof rawStudent?.id === "number" ? rawStudent.id : 0;
+
+  return {
+    id: rawId,
+    name: rawName || "未關聯學生",
+  };
+}
+
+function normalizePersistedSession(
+  value: unknown,
+  students: StudentProfile[],
+  fallbackId: number
+): Session {
+  const session = (isRecord(value) ? value : {}) as Partial<Session>;
+  const linkedStudent =
+    session.studentId != null
+      ? students.find((student) => student.id === session.studentId)
+      : undefined;
+
+  return {
+    id: typeof session.id === "number" ? session.id : fallbackId,
+    studentId: typeof session.studentId === "number" ? session.studentId : undefined,
+    student: linkedStudent
+      ? toSessionStudent(linkedStudent)
+      : getSafeSessionStudentSnapshot(session, students),
+    dateISO: isValidDateISO(session.dateISO) ? session.dateISO : todayISO(),
+    start: normalizeHHMM(session.start, "00:00"),
+    durationMin:
+      typeof session.durationMin === "number" && session.durationMin > 0
+        ? session.durationMin
+        : 60,
+    status: normalizeSessionStatus(session.status),
+    reason: session.reason,
+    note: typeof session.note === "string" ? session.note : undefined,
+    kind: normalizeSessionKind(session.kind),
+    makeupOfDateISO: isValidDateISO(session.makeupOfDateISO)
+      ? session.makeupOfDateISO
+      : undefined,
+    makeupOfSessionId:
+      typeof session.makeupOfSessionId === "number" ? session.makeupOfSessionId : undefined,
+  };
+}
+
+function normalizePersistedRule(
+  value: unknown,
+  fallbackId: number
+): StudentScheduleRule | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.studentId !== "number") return null;
+
+  const weekday =
+    value.weekday === 0 ||
+    value.weekday === 1 ||
+    value.weekday === 2 ||
+    value.weekday === 3 ||
+    value.weekday === 4 ||
+    value.weekday === 5 ||
+    value.weekday === 6
+      ? value.weekday
+      : 1;
+
+  return {
+    id: typeof value.id === "number" ? value.id : fallbackId,
+    studentId: value.studentId,
+    weekday,
+    start: normalizeHHMM(value.start, "16:00"),
+    durationMin:
+      typeof value.durationMin === "number" && value.durationMin > 0
+        ? value.durationMin
+        : 60,
+    isActive: typeof value.isActive === "boolean" ? value.isActive : true,
+  };
+}
+
+type SeedSessionConfig = Omit<Session, "student" | "studentId"> & {
+  studentIndex: number;
+};
+
+function createSeedSession(config: SeedSessionConfig): Session | null {
+  const student = studentProfilesSeed[config.studentIndex];
+  if (!student) return null;
+
+  const { studentIndex: _studentIndex, ...session } = config;
+  return {
+    ...session,
+    studentId: student.id,
+    student: toSessionStudent(student),
+  };
+}
+
+function buildSeedSessions(): Session[] {
+  const d = todayISO();
+  const configs: SeedSessionConfig[] = [
+    { id: 2001, studentIndex: 0, dateISO: d, start: "14:00", durationMin: 60, status: "pending", kind: "regular" },
+    { id: 2002, studentIndex: 1, dateISO: d, start: "15:00", durationMin: 60, status: "pending", kind: "regular" },
+    { id: 2003, studentIndex: 0, dateISO: d, start: "16:00", durationMin: 60, status: "pending", kind: "regular" },
+    {
+      id: 2004,
+      studentIndex: 1,
+      dateISO: d,
+      start: "17:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "makeup",
+      makeupOfDateISO: addDaysISO(d, -4),
+      makeupOfSessionId: 1999,
+    },
+    { id: 2101, studentIndex: 0, dateISO: "2026-05-01", start: "10:00", durationMin: 60, status: "present", kind: "regular" },
+    { id: 2102, studentIndex: 0, dateISO: "2026-05-08", start: "10:00", durationMin: 60, status: "present", kind: "regular" },
+    {
+      id: 2103,
+      studentIndex: 0,
+      dateISO: "2026-05-15",
+      start: "10:00",
+      durationMin: 60,
+      status: "present",
+      kind: "makeup",
+      makeupOfDateISO: "2026-05-12",
+      makeupOfSessionId: 2099,
+    },
+    { id: 2104, studentIndex: 0, dateISO: "2026-05-22", start: "10:00", durationMin: 60, status: "present", kind: "extra" },
+    {
+      id: 2105,
+      studentIndex: 0,
+      dateISO: "2026-05-29",
+      start: "10:00",
+      durationMin: 60,
+      status: "absent",
+      reason: { id: 1, name: "生病", code: "SICK" },
+      kind: "regular",
+    },
+    { id: 2106, studentIndex: 0, dateISO: "2026-04-25", start: "10:00", durationMin: 60, status: "present", kind: "regular" },
+    { id: 2107, studentIndex: 1, dateISO: "2026-05-03", start: "16:00", durationMin: 60, status: "present", kind: "regular" },
+    { id: 2108, studentIndex: 1, dateISO: "2026-05-10", start: "16:00", durationMin: 60, status: "pending", kind: "regular" },
+    { id: 2109, studentIndex: 2, dateISO: "2026-05-05", start: "17:00", durationMin: 60, status: "present", kind: "regular" },
+    { id: 2110, studentIndex: 3, dateISO: "2026-05-06", start: "18:00", durationMin: 60, status: "present", kind: "regular" },
+    {
+      id: 2111,
+      studentIndex: 3,
+      dateISO: "2026-05-13",
+      start: "18:00",
+      durationMin: 60,
+      status: "present",
+      kind: "makeup",
+      makeupOfDateISO: "2026-05-09",
+      makeupOfSessionId: 2098,
+    },
+    { id: 2112, studentIndex: 4, dateISO: "2026-05-07", start: "19:00", durationMin: 60, status: "present", kind: "regular" },
+    { id: 2113, studentIndex: 5, dateISO: "2026-05-14", start: "19:30", durationMin: 60, status: "present", kind: "extra" },
+  ];
+
+  return configs
+    .map(createSeedSession)
+    .filter((session): session is Session => Boolean(session));
 }
 
 function restorePersistedData() {
@@ -37,66 +268,46 @@ function restorePersistedData() {
 
     const parsed = JSON.parse(saved);
 
-    const restoredStudents: StudentProfile[] =
-      Array.isArray(parsed.students) && parsed.students.length > 0
-        ? [...parsed.students]
-        : [...studentProfilesSeed];
+    const restoredStudents: StudentProfile[] = Array.isArray(parsed.students)
+      ? parsed.students.map((student: unknown, index: number) =>
+          normalizePersistedStudent(student, index + 1)
+        )
+      : [];
 
-    const restoredSessions: Session[] = Array.isArray(parsed.sessions)
+    const restoredSessions: unknown[] = Array.isArray(parsed.sessions)
       ? parsed.sessions
       : [];
 
     const normalizedStudents = [...restoredStudents];
+    const normalizedSessions = restoredSessions.map((session, index) =>
+      normalizePersistedSession(session, normalizedStudents, index + 1)
+    );
+    const normalizedRules = Array.isArray(parsed.studentScheduleRules)
+      ? parsed.studentScheduleRules
+          .map((rule: unknown, index: number) => normalizePersistedRule(rule, index + 1))
+          .filter((rule: StudentScheduleRule | null): rule is StudentScheduleRule => Boolean(rule))
+      : [];
+    const selectedDate = isValidDateISO(parsed.selectedDate) ? parsed.selectedDate : todayISO();
 
-    const normalizedSessions = restoredSessions.map((session) => {
-      const rawName =
-        typeof session?.student?.name === "string"
-          ? session.student.name.trim()
-          : "";
+    const activeTab =
+      parsed.activeTab === "today" ||
+      parsed.activeTab === "month" ||
+      parsed.activeTab === "students" ||
+      parsed.activeTab === "data"
+        ? parsed.activeTab
+        : "today";
 
-      let matchedStudent: StudentProfile | undefined;
-
-      if (session.studentId != null) {
-        matchedStudent = normalizedStudents.find(
-          (student) => student.id === session.studentId
-        );
-      }
-
-      if (!matchedStudent && rawName) {
-        matchedStudent = normalizedStudents.find(
-          (student) => student.name.trim() === rawName
-        );
-      }
-
-      if (!matchedStudent && rawName) {
-        const createdStudent: StudentProfile = {
-          id: getNextStudentProfileId(normalizedStudents),
-          name: rawName,
-          birthday: "",
-          school: "",
-          status: "active",
-        };
-        normalizedStudents.push(createdStudent);
-        matchedStudent = createdStudent;
-      }
-
-      if (!matchedStudent) {
-        return session;
-      }
-
-      return {
-        ...session,
-        studentId: matchedStudent.id,
-        student: toSessionStudent(matchedStudent),
-      };
-    });
+    const normalizedGlobalEvents: GlobalEvent[] = Array.isArray(parsed.globalEvents)
+      ? (parsed.globalEvents.filter((event: unknown) => isRecord(event)) as GlobalEvent[])
+      : [];
 
     return {
-      activeTab: parsed.activeTab,
-      selectedDate: parsed.selectedDate,
-      globalEvents: Array.isArray(parsed.globalEvents) ? parsed.globalEvents : [],
+      activeTab,
+      selectedDate,
+      globalEvents: normalizedGlobalEvents,
       students: normalizedStudents,
       sessions: normalizedSessions,
+      studentScheduleRules: normalizedRules,
     };
   } catch (e) {
     console.error("Restore persisted data failed", e);
@@ -104,11 +315,17 @@ function restorePersistedData() {
   }
 }
 
+function getInitialTheme() {
+  try {
+    const savedTheme = localStorage.getItem("rollcall-theme");
+    return savedTheme === "dark" || savedTheme === "light" ? savedTheme : "light";
+  } catch {
+    return "light";
+  }
+}
+
 export default function App() {
-  const [theme, setTheme] = useState<'light'|'dark'>(() => {
-    try { return localStorage.getItem('rollcall-theme') as 'light'|'dark' || 'light'; }
-    catch { return 'light'; }
-  });
+  const [theme, setTheme] = useState<'light'|'dark'>(() => getInitialTheme());
   const isDark = theme === 'dark';
   const restoredData = useMemo(() => restorePersistedData(), []);
   
@@ -138,7 +355,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const nextDate = restoredData?.selectedDate;
 
-    if (typeof nextDate === "string" && nextDate.trim()) {
+    if (isValidDateISO(nextDate)) {
       return nextDate;
     }
 
@@ -153,58 +370,11 @@ export default function App() {
   }, []);
 
   const [sessions, setSessions] = useState<Session[]>(() => {
-    if (restoredData?.sessions && restoredData.sessions.length > 0) {
+    if (restoredData) {
       return restoredData.sessions;
     }
 
-    const d = todayISO();
-    const studentA = studentProfilesSeed[0];
-    const studentB = studentProfilesSeed[1];
-
-    return [
-      {
-        id: 2001,
-        studentId: studentA.id,
-        student: toSessionStudent(studentA),
-        dateISO: d,
-        start: "14:00",
-        durationMin: 60,
-        status: "pending",
-        kind: "regular",
-      },
-      {
-        id: 2002,
-        studentId: studentB.id,
-        student: toSessionStudent(studentB),
-        dateISO: d,
-        start: "15:00",
-        durationMin: 60,
-        status: "pending",
-        kind: "regular",
-      },
-      {
-        id: 2003,
-        studentId: studentA.id,
-        student: toSessionStudent(studentA),
-        dateISO: d,
-        start: "16:00",
-        durationMin: 60,
-        status: "pending",
-        kind: "regular",
-      },
-      {
-        id: 2004,
-        studentId: studentB.id,
-        student: toSessionStudent(studentB),
-        dateISO: d,
-        start: "17:00",
-        durationMin: 60,
-        status: "pending",
-        kind: "makeup",
-        makeupOfDateISO: addDaysISO(d, -4),
-        makeupOfSessionId: 1999,
-      },
-    ];
+    return buildSeedSessions();
   });
 
   const [globalEvents, setGlobalEvents] = useState<GlobalEvent[]>(() => {
@@ -216,11 +386,19 @@ export default function App() {
   });
 
   const [students, setStudents] = useState<StudentProfile[]>(() => {
-    if (restoredData?.students && restoredData.students.length > 0) {
+    if (restoredData) {
       return restoredData.students;
     }
 
     return studentProfilesSeed;
+  });
+
+  const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
+    if (restoredData) {
+      return restoredData.studentScheduleRules;
+    }
+
+    return studentScheduleRulesSeed;
   });
 
 
@@ -233,12 +411,13 @@ export default function App() {
         activeTab,
         globalEvents,
         students,
+        studentScheduleRules,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
       console.error("Save app state failed", e);
     }
-  }, [sessions, selectedDate, activeTab, globalEvents, students]);
+  }, [sessions, selectedDate, activeTab, globalEvents, students, studentScheduleRules]);
 
   const [toast, setToast] = useState<string>("");
   
@@ -247,10 +426,6 @@ export default function App() {
     const t = setTimeout(() => setToast(""), 6000);
     return () => clearTimeout(t);
   }, [toast]);
-
-  function exportExcelStub() {
-    setToast("（預覽）已觸發匯出 Excel");
-  }
 
   const tabs: TabDef[] = useMemo(
     () => [
@@ -302,6 +477,7 @@ export default function App() {
               setTheme={setTheme}
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
+              students={students}
               sessions={sessions}
               setSessions={setSessions}
               globalEvents={globalEvents}
@@ -310,45 +486,26 @@ export default function App() {
             />
           ) : activeTab === "students" ? (
             <StudentsPage
+              selectedDate={selectedDate}
               students={students}
               setStudents={setStudents}
+              studentScheduleRules={studentScheduleRules}
+              setStudentScheduleRules={setStudentScheduleRules}
               sessions={sessions}
               setSessions={setSessions}
               setToast={setToast}
             />
           ) : activeTab === "data" ? (
-            <div className="mx-auto max-w-4xl px-5 py-8">
-              <HeaderBar title="數據與匯出" icon={<IconFile className="h-6 w-6" />} />
-              <div
-                className={`mt-6 rounded-[24px] shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 p-6 ${
-                  isDark ? "bg-[#1C1C1E] ring-white/10" : "bg-white ring-[#E5E5EA]"
-                }`}
-              >
-                <div className={`text-lg font-extrabold ${isDark ? "text-white" : "text-slate-900"}`}>
-                  匯出資料
-                </div>
-                <div
-                  className={`mt-2 text-sm leading-relaxed ${
-                    isDark ? "text-[#8E8E93]" : "text-slate-500"
-                  }`}
-                >
-                  將所有點名與請假紀錄匯出為 Excel 檔案，以便進一步統計與存檔。
-                </div>
-                <div className="mt-6">
-                  <button
-                    onClick={exportExcelStub}
-                    className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-semibold ring-1 transition active:scale-[0.99] ${
-                      isDark
-                        ? "bg-emerald-900/20 text-emerald-400 ring-emerald-900/50 hover:bg-emerald-900/40"
-                        : "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100"
-                    }`}
-                  >
-                    <IconFile className="h-5 w-5" />
-                    匯出 Excel
-                  </button>
-                </div>
-              </div>
-            </div>
+            <DataPage
+              setTheme={setTheme}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              students={students}
+              studentScheduleRules={studentScheduleRules}
+              sessions={sessions}
+              globalEvents={globalEvents}
+              setToast={setToast}
+            />
           ) : null}
         </div>
 

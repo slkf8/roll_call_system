@@ -26,6 +26,7 @@ import {
   pad2,
   roundToNearest15Min,
   getNextSessionId,
+  getSessionStudentName,
   checkOverlap,
   formatConflictSummary,
   isSessionCovered,
@@ -125,6 +126,11 @@ export default function TodayPage({
     return { total, present, absent, pending };
   }, [allDaySessions, currentGlobalEvent]);
 
+  const schedulableStudents = useMemo(
+    () => students.filter((s) => s.status !== "inactive"),
+    [students]
+  );
+
   const [absentOpen, setAbsentOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const selected = useMemo(() => sessions.find((x) => x.id === selectedId) ?? null, [sessions, selectedId]);
@@ -146,7 +152,9 @@ export default function TodayPage({
   const deleteTarget = useMemo(() => sessions.find((x) => x.id === deleteId) ?? null, [sessions, deleteId]);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createStudentId, setCreateStudentId] = useState<number>(() => students[0]?.id ?? 0);
+  const [createStudentId, setCreateStudentId] = useState<number>(
+    () => students.find((s) => s.status !== "inactive")?.id ?? 0
+  );
   const [createDate, setCreateDate] = useState<string>(selectedDate);
   const [createStart, setCreateStart] = useState<string>("10:00");
   const [createDuration, setCreateDuration] = useState<number>(60);
@@ -273,13 +281,31 @@ export default function TodayPage({
   function saveAbsentByReason(reason: Reason) {
     if (!selected) return;
     patchSession(selected.id, { status: "absent", reason, note: absentNote ? absentNote : undefined });
-    setToast(`${selected.student.name} ${selected.start} 缺席：${reason.name}`);
+    setToast(`${getSessionStudentName(selected)} ${selected.start} 缺席：${reason.name}`);
     setAbsentOpen(false);
   }
 
   function openMakeupFromMenu(id: number, purpose: "makeup" | "extra") {
     const s = sessions.find((x) => x.id === id);
     if (!s) return;
+
+    if (s.studentId == null) {
+      setToast("找不到學生主檔，無法安排補課或加課");
+      return;
+    }
+
+    const linkedStudent = students.find((student) => student.id === s.studentId);
+
+    if (!linkedStudent) {
+      setToast("找不到學生主檔，無法安排補課或加課");
+      return;
+    }
+
+    if (linkedStudent.status === "inactive") {
+      setToast("已停用學生不可安排補課或加課");
+      return;
+    }
+
     setSelectedId(id);
     setMkDate(selectedDate);
     setMkStart(endTime(s));
@@ -289,12 +315,30 @@ export default function TodayPage({
 
   function createMakeup() {
     if (!selected) return;
+
+    if (selected.studentId == null) {
+      setToast("找不到學生主檔，無法安排補課或加課");
+      return;
+    }
+
+    const linkedStudent = students.find((s) => s.id === selected.studentId);
+
+    if (!linkedStudent) {
+      setToast("找不到學生主檔，無法安排補課或加課");
+      return;
+    }
+
+    if (linkedStudent.status === "inactive") {
+      setToast("已停用學生不可安排補課或加課");
+      return;
+    }
+
     const nextId = getNextSessionId(sessions);
     
     const newSession: Session = {
       id: nextId,
       studentId: selected.studentId,
-      student: toSessionStudent(selected.student),
+      student: toSessionStudent(linkedStudent),
       dateISO: mkDate,
       start: mkStart,
       durationMin: 60,
@@ -345,6 +389,12 @@ export default function TodayPage({
   }
 
   function openCreateSheet() {
+    if (schedulableStudents.length === 0) {
+      setToast("請先新增學生");
+      return;
+    }
+
+    setCreateStudentId(schedulableStudents[0].id);
     setCreateDate(selectedDate);
     setCreateStart(roundToNearest15Min());
     setCreateDuration(60);
@@ -352,8 +402,12 @@ export default function TodayPage({
   }
 
   function handleCreateSession() {
-    const student = students.find((s) => s.id === createStudentId);
-    if (!student) return;
+    const student = schedulableStudents.find((s) => s.id === createStudentId);
+
+    if (!student || student.status === "inactive") {
+      setToast("已停用學生不可新增排課");
+      return;
+    }
 
     const clamped = Math.min(120, Math.max(1, createDuration || 1));
     const nextId = getNextSessionId(sessions);
@@ -545,7 +599,13 @@ export default function TodayPage({
             <div className={`px-1 text-sm font-bold ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>
               未完成點名 ({visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending").length})
             </div>
-            {visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending").length === 0 ? (
+            {visibleSessions.length === 0 ? (
+              <div className={`rounded-[24px] border border-dashed py-6 text-center text-sm ${
+                isDark ? 'border-white/10 bg-[#1C1C1E]/50 text-[#8E8E93]' : 'border-slate-300 bg-white/50 text-slate-400'
+              }`}>
+                今日沒有課次
+              </div>
+            ) : visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending").length === 0 ? (
               <div className={`rounded-[24px] border border-dashed py-6 text-center text-sm ${
                 isDark ? 'border-white/10 bg-[#1C1C1E]/50 text-[#8E8E93]' : 'border-slate-300 bg-white/50 text-slate-400'
               }`}>
@@ -567,7 +627,7 @@ export default function TodayPage({
                           return;
                         }
                         patchSession(s.id, { status: "present", reason: undefined, note: undefined });
-                        setToast(`${s.student.name} ${s.start} 已到`);
+                        setToast(`${getSessionStudentName(s)} ${s.start} 已到`);
                       }}
                       onAbsent={() => {
                         if (isSessionCovered(s, currentGlobalEvent)) {
@@ -657,7 +717,7 @@ export default function TodayPage({
                           return;
                         }
                         patchSession(s.id, { status: "present", reason: undefined, note: undefined });
-                        setToast(`${s.student.name} ${s.start} 已到`);
+                        setToast(`${getSessionStudentName(s)} ${s.start} 已到`);
                       }}
                       onAbsent={() => {
                         if (isSessionCovered(s, currentGlobalEvent)) {
@@ -742,7 +802,7 @@ export default function TodayPage({
       <IOSSheet
         open={absentOpen}
         title="請假 / 缺席"
-        subtitle={selected ? `${selected.student.name} · ${selected.dateISO} · ${selected.start}–${endTime(selected)}` : undefined}
+        subtitle={selected ? `${getSessionStudentName(selected)} · ${selected.dateISO} · ${selected.start}–${endTime(selected)}` : undefined}
         onClose={() => setAbsentOpen(false)}
         leftAction={{ label: "取消", onClick: () => setAbsentOpen(false) }}
       >
@@ -783,7 +843,7 @@ export default function TodayPage({
       <IOSSheet
         open={makeupOpen}
         title={mkPurpose === "makeup" ? "安排補課" : "安排加課"}
-        subtitle={selected ? `${selected.student.name} · 原課 ${selected.dateISO} ${selected.start}–${endTime(selected)}` : undefined}
+        subtitle={selected ? `${getSessionStudentName(selected)} · 原課 ${selected.dateISO} ${selected.start}–${endTime(selected)}` : undefined}
         onClose={() => setMakeupOpen(false)}
         leftAction={{ label: "取消", onClick: () => setMakeupOpen(false) }}
         rightAction={{ label: "完成", onClick: createMakeup, emphasize: true }}
@@ -835,7 +895,7 @@ export default function TodayPage({
       <IOSSheet
         open={editOpen}
         title="編輯課次"
-        subtitle={selected ? `${selected.student.name} · ${selected.dateISO}` : undefined}
+        subtitle={selected ? `${getSessionStudentName(selected)} · ${selected.dateISO}` : undefined}
         onClose={() => setEditOpen(false)}
         leftAction={{ label: "取消", onClick: () => setEditOpen(false) }}
         rightAction={{ label: "完成", onClick: saveEdit, emphasize: true }}
@@ -875,7 +935,7 @@ export default function TodayPage({
         title="刪除課次？"
         subtitle={
           deleteTarget
-            ? `${deleteTarget.student.name} · ${deleteTarget.dateISO} · ${deleteTarget.start}–${endTime(deleteTarget)}`
+            ? `${getSessionStudentName(deleteTarget)} · ${deleteTarget.dateISO} · ${deleteTarget.start}–${endTime(deleteTarget)}`
             : undefined
         }
         onClose={() => setDeleteOpen(false)}
@@ -915,8 +975,10 @@ export default function TodayPage({
                 isDark ? 'bg-[#1C1C1E] border-white/10 text-[#F2F2F7] focus:ring-white/20' : 'bg-white border-[#E5E5EA] text-slate-800 focus:ring-[#C7DAFF]'
               }`}
             >
-              {students.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+              {schedulableStudents.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
               ))}
             </select>
           </FieldRow>
