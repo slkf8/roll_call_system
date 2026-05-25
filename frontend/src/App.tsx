@@ -393,6 +393,7 @@ export default function App() {
 
     return studentProfilesSeed;
   });
+  const [isStudentsBackendAvailable, setIsStudentsBackendAvailable] = useState(false);
 
   const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
     if (restoredData) {
@@ -408,10 +409,14 @@ export default function App() {
     fetchStudents()
       .then((backendStudents) => {
         if (!cancelled) {
+          setIsStudentsBackendAvailable(true);
           setStudents(backendStudents);
         }
       })
       .catch((error) => {
+        if (!cancelled) {
+          setIsStudentsBackendAvailable(false);
+        }
         console.warn("Backend students unavailable, using local data", error);
       });
 
@@ -508,6 +513,7 @@ export default function App() {
               selectedDate={selectedDate}
               students={students}
               setStudents={setStudents}
+              isStudentsBackendAvailable={isStudentsBackendAvailable}
               studentScheduleRules={studentScheduleRules}
               setStudentScheduleRules={setStudentScheduleRules}
               sessions={sessions}

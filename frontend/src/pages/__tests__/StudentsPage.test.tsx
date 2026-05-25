@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import StudentsPage from "../StudentsPage";
 import type { Session, StudentProfile, StudentScheduleRule } from "../../shared/appShared";
 
@@ -122,11 +122,13 @@ function StudentsPageHarness({
   initialStudents = makeStudents(),
   initialRules = makeRules(),
   initialSessions = makeSessions(),
+  isStudentsBackendAvailable = false,
   onSnapshot,
 }: {
   initialStudents?: StudentProfile[];
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
+  isStudentsBackendAvailable?: boolean;
   onSnapshot: (snapshot: Snapshot) => void;
 }) {
   const [students, setStudents] = useState(initialStudents);
@@ -151,6 +153,7 @@ function StudentsPageHarness({
       selectedDate={selectedDate}
       students={students}
       setStudents={setStudents}
+      isStudentsBackendAvailable={isStudentsBackendAvailable}
       studentScheduleRules={rules}
       setStudentScheduleRules={setRules}
       sessions={sessions}
@@ -164,6 +167,7 @@ function renderStudentsPage(options: {
   initialStudents?: StudentProfile[];
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
+  isStudentsBackendAvailable?: boolean;
 } = {}) {
   let snapshot: Snapshot = {
     students: [],
@@ -213,7 +217,18 @@ function uniqueRegularKeys(sessions: Session[]) {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
+
+async function fillCreateStudentForm(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getAllByRole("button", { name: "新增學生" })[0]);
+
+  const inputs = document.querySelectorAll("input");
+  fireEvent.change(inputs[1], { target: { value: name } });
+  fireEvent.change(inputs[2], { target: { value: "2012-04-05" } });
+  fireEvent.change(inputs[3], { target: { value: "測試學校" } });
+}
 
 describe("StudentsPage", () => {
   it("shows an empty state when there are no students", () => {
@@ -245,6 +260,112 @@ describe("StudentsPage", () => {
     expect(screen.getByText("王家朗")).toBeInTheDocument();
     expect(screen.queryByText("陳小明")).not.toBeInTheDocument();
     expect(screen.queryByText("李小欣")).not.toBeInTheDocument();
+  });
+
+  it("creates a student through backend when backend students are available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          id: 900,
+          name: "後端新增學生",
+          birthday: "2012-04-05",
+          school: "測試學校",
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+          createdAt: "2026-05-25T10:00:00",
+          updatedAt: "2026-05-25T10:00:00",
+        }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: true,
+    });
+
+    await fillCreateStudentForm(user, "後端新增學生");
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() =>
+      expect(snapshot.students).toEqual([
+        expect.objectContaining({
+          id: 900,
+          name: "後端新增學生",
+          birthday: "2012-04-05",
+          school: "測試學校",
+          status: "active",
+        }),
+      ])
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "後端新增學生",
+          birthday: "2012-04-05",
+          school: "測試學校",
+          status: "active",
+        }),
+      })
+    );
+  });
+
+  it("does not create a local student when backend create fails in backend mode", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: true,
+    });
+
+    await fillCreateStudentForm(user, "失敗學生");
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("新增學生失敗，請確認後端是否正常")
+    );
+    expect(snapshot.students).toEqual([]);
+    expect(screen.getAllByText("新增學生").length).toBeGreaterThan(1);
+  });
+
+  it("keeps local student creation when backend students are unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: false,
+    });
+
+    await fillCreateStudentForm(user, "本地新增學生");
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() =>
+      expect(snapshot.students).toEqual([
+        expect.objectContaining({
+          id: 1001,
+          name: "本地新增學生",
+          birthday: "2012-04-05",
+          school: "測試學校",
+          status: "active",
+        }),
+      ])
+    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("shows schedule rule sections and counts per student", () => {

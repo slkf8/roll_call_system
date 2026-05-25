@@ -1,5 +1,6 @@
 import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { createStudent } from "../api/studentsApi";
 import type { Session, StudentProfile, StudentScheduleRule } from "../shared/appShared";
 import {
   studentProfilesSeed,
@@ -41,6 +42,7 @@ type StudentsPageProps = {
   selectedDate?: string;
   students?: StudentProfile[];
   setStudents?: Dispatch<SetStateAction<StudentProfile[]>>;
+  isStudentsBackendAvailable?: boolean;
   studentScheduleRules?: StudentScheduleRule[];
   setStudentScheduleRules?: Dispatch<SetStateAction<StudentScheduleRule[]>>;
   sessions?: Session[];
@@ -183,6 +185,7 @@ export default function StudentsPage({
   selectedDate,
   students,
   setStudents,
+  isStudentsBackendAvailable = false,
   studentScheduleRules,
   setStudentScheduleRules,
   sessions,
@@ -213,7 +216,7 @@ export default function StudentsPage({
 
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateList, setDuplicateList] = useState<StudentProfile[]>([]);
-  const [pendingDraftSave, setPendingDraftSave] = useState<(() => void) | null>(null);
+  const [pendingDraftSave, setPendingDraftSave] = useState<(() => void | Promise<void>) | null>(null);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -677,20 +680,35 @@ export default function StudentsPage({
     setDraft({ name: "", birthday: "", school: "" });
   }
 
-  function executeDraftSave() {
+  async function executeDraftSave() {
     if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
 
     if (editorMode === "create") {
-      safeSetStudents((current) => [
-        ...current,
-        {
-          id: getNextStudentId(current),
-          name: draft.name.trim(),
-          birthday: draft.birthday,
-          school: draft.school.trim(),
-          status: "active",
-        },
-      ]);
+      const payload = {
+        name: draft.name.trim(),
+        birthday: draft.birthday,
+        school: draft.school.trim(),
+        status: "active" as const,
+      };
+
+      if (isStudentsBackendAvailable) {
+        try {
+          const createdStudent = await createStudent(payload);
+          safeSetStudents((current) => [...current, createdStudent]);
+        } catch (error) {
+          console.warn("Create student failed", error);
+          setToast?.("新增學生失敗，請確認後端是否正常");
+          return;
+        }
+      } else {
+        safeSetStudents((current) => [
+          ...current,
+          {
+            id: getNextStudentId(current),
+            ...payload,
+          },
+        ]);
+      }
     } else if (editingStudent) {
       const nextName = draft.name.trim();
 
@@ -714,7 +732,7 @@ export default function StudentsPage({
     closeEditor();
   }
 
-  function handleSubmitDraft() {
+  async function handleSubmitDraft() {
     if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
 
     const duplicates = findDuplicates(safeStudents, draft, editingStudent?.id);
@@ -725,7 +743,7 @@ export default function StudentsPage({
       return;
     }
 
-    executeDraftSave();
+    await executeDraftSave();
   }
 
   function openAction(student: StudentProfile, action: string) {
@@ -1246,7 +1264,7 @@ export default function StudentsPage({
           label: editorMode === "create" ? "建立" : "儲存",
           onClick: () => {
             if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
-            handleSubmitDraft();
+            void handleSubmitDraft();
           },
           emphasize: true,
         }}
@@ -1509,7 +1527,7 @@ export default function StudentsPage({
         rightAction={{
           label: editorMode === "create" ? "仍然建立" : "仍然儲存",
           onClick: () => {
-            pendingDraftSave?.();
+            void pendingDraftSave?.();
           },
           emphasize: true,
         }}
