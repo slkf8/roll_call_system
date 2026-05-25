@@ -31,3 +31,9 @@ exports/*
 # DB（若你之後用 SQLite）
 *.sqlite
 *.sqlite3
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/__pycache__/
+backend/.pytest_cache/
