@@ -3,6 +3,7 @@ import TodayPage from "./pages/TodayPage";
 import MonthPage from "./pages/MonthPage";
 import StudentsPage from "./pages/StudentsPage";
 import DataPage from "./pages/DataPage";
+import { fetchStudents } from "./api/studentsApi";
 import type {
   TabKey,
   TabDef,
@@ -400,6 +401,24 @@ export default function App() {
 
     return studentScheduleRulesSeed;
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchStudents()
+      .then((backendStudents) => {
+        if (!cancelled) {
+          setStudents(backendStudents);
+        }
+      })
+      .catch((error) => {
+        console.warn("Backend students unavailable, using local data", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
 
   useEffect(() => {

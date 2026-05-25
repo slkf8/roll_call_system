@@ -43,14 +43,109 @@ function getValueNearLabel(label: string) {
 
 beforeEach(() => {
   installMemoryLocalStorage();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.reject(new Error("backend unavailable")))
+  );
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("App empty data safety", () => {
+  it("uses backend students when GET /api/students succeeds", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          id: 501,
+          name: "後端學生",
+          birthday: "2012-01-02",
+          school: "後端學校",
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+          createdAt: "2026-05-25T10:00:00",
+          updatedAt: "2026-05-25T10:00:00",
+        },
+      ],
+    } as Response);
+    setStoredAppData({
+      activeTab: "students",
+      selectedDate: "2026-05-20",
+      students: [],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("管理學生")).toBeInTheDocument();
+    expect(await screen.findByText("後端學生")).toBeInTheDocument();
+    expect(screen.queryByText("尚未建立任何學生")).not.toBeInTheDocument();
+  });
+
+  it("treats an empty backend students response as a valid empty source", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    } as Response);
+    setStoredAppData({
+      activeTab: "students",
+      selectedDate: "2026-05-20",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("管理學生")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("尚未建立任何學生")).toBeInTheDocument();
+      expect(screen.queryByText("本地學生")).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps local fallback students when backend students loading fails", async () => {
+    setStoredAppData({
+      activeTab: "students",
+      selectedDate: "2026-05-20",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("本地學生")).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/students"));
+    expect(screen.queryByText("尚未建立任何學生")).not.toBeInTheDocument();
+  });
+
   it("respects persisted empty arrays without injecting demo sessions", async () => {
     setStoredAppData({
       activeTab: "data",
