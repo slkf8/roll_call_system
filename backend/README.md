@@ -29,6 +29,14 @@ API docs:
 http://127.0.0.1:8000/docs
 ```
 
+## Test
+
+Run from this `backend/` directory:
+
+```bash
+python -m pytest tests
+```
+
 ## Database
 
 SQLite database file:
@@ -56,4 +64,4 @@ Not implemented yet:
 - global events
 - statistics
 - Excel export
-- frontend API integration
+- frontend API integration beyond students
