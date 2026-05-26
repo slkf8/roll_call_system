@@ -74,6 +74,21 @@ describe("App empty data safety", () => {
         },
       ],
     } as Response);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          id: 601,
+          studentId: 501,
+          weekday: 1,
+          start: "16:00",
+          durationMin: 60,
+          isActive: true,
+          createdAt: "2026-05-25T10:00:00",
+          updatedAt: "2026-05-25T10:00:00",
+        },
+      ],
+    } as Response);
     setStoredAppData({
       activeTab: "students",
       selectedDate: "2026-05-20",
@@ -87,6 +102,7 @@ describe("App empty data safety", () => {
 
     expect(await screen.findByText("管理學生")).toBeInTheDocument();
     expect(await screen.findByText("後端學生")).toBeInTheDocument();
+    expect(await screen.findByText("共 1 條規則")).toBeInTheDocument();
     expect(screen.queryByText("尚未建立任何學生")).not.toBeInTheDocument();
   });
 
@@ -108,7 +124,9 @@ describe("App empty data safety", () => {
         },
       ],
       sessions: [],
-      studentScheduleRules: [],
+      studentScheduleRules: [
+        { id: 1, studentId: 1, weekday: 1, start: "16:00", durationMin: 60, isActive: true },
+      ],
       globalEvents: [],
     });
 
@@ -119,6 +137,54 @@ describe("App empty data safety", () => {
       expect(screen.getByText("尚未建立任何學生")).toBeInTheDocument();
       expect(screen.queryByText("本地學生")).not.toBeInTheDocument();
     });
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.studentScheduleRules).toEqual([]);
+    });
+  });
+
+  it("keeps fallback schedule rules when backend rules loading fails", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            id: 1,
+            name: "本地學生",
+            birthday: "2012-03-08",
+            school: "本地學校",
+            status: "active",
+            deactivateMode: null,
+            deactivateOn: null,
+            createdAt: "2026-05-25T10:00:00",
+            updatedAt: "2026-05-25T10:00:00",
+          },
+        ],
+      } as Response)
+      .mockRejectedValueOnce(new Error("rules unavailable"));
+    setStoredAppData({
+      activeTab: "students",
+      selectedDate: "2026-05-20",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [],
+      studentScheduleRules: [
+        { id: 1, studentId: 1, weekday: 1, start: "16:00", durationMin: 60, isActive: true },
+      ],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("本地學生")).toBeInTheDocument();
+    expect(await screen.findByText("共 1 條規則")).toBeInTheDocument();
   });
 
   it("keeps local fallback students when backend students loading fails", async () => {

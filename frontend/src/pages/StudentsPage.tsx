@@ -2,6 +2,11 @@ import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createStudent, updateStudent } from "../api/studentsApi";
 import type { UpdateStudentPayload } from "../api/studentsApi";
+import {
+  createScheduleRule,
+  deleteScheduleRule,
+  updateScheduleRule,
+} from "../api/scheduleRulesApi";
 import type { Session, StudentProfile, StudentScheduleRule } from "../shared/appShared";
 import {
   studentProfilesSeed,
@@ -44,6 +49,7 @@ type StudentsPageProps = {
   students?: StudentProfile[];
   setStudents?: Dispatch<SetStateAction<StudentProfile[]>>;
   isStudentsBackendAvailable?: boolean;
+  isScheduleRulesBackendAvailable?: boolean;
   studentScheduleRules?: StudentScheduleRule[];
   setStudentScheduleRules?: Dispatch<SetStateAction<StudentScheduleRule[]>>;
   sessions?: Session[];
@@ -211,6 +217,7 @@ export default function StudentsPage({
   students,
   setStudents,
   isStudentsBackendAvailable = false,
+  isScheduleRulesBackendAvailable = false,
   studentScheduleRules,
   setStudentScheduleRules,
   sessions,
@@ -585,50 +592,88 @@ export default function StudentsPage({
     setRuleEditorOpen(true);
   }
 
-  function saveRuleDraft() {
+  async function saveRuleDraft() {
     if (!ruleOwnerStudent || !ruleDraft.start.trim() || ruleDraft.durationMin <= 0) {
       setToast?.("請輸入有效的上課時間與時長");
       return;
     }
 
+    const payload = {
+      weekday: ruleDraft.weekday,
+      start: ruleDraft.start,
+      durationMin: ruleDraft.durationMin,
+      isActive: ruleDraft.isActive,
+    };
+
     if (ruleEditorMode === "create") {
-      safeSetRules((current) => [
-        ...current,
-        {
-          id: getNextRuleId(current),
-          studentId: ruleOwnerStudent.id,
-          weekday: ruleDraft.weekday,
-          start: ruleDraft.start,
-          durationMin: ruleDraft.durationMin,
-          isActive: ruleDraft.isActive,
-        },
-      ]);
+      if (isScheduleRulesBackendAvailable) {
+        try {
+          const createdRule = await createScheduleRule(ruleOwnerStudent.id, payload);
+          safeSetRules((current) => [...current, createdRule]);
+        } catch (error) {
+          console.warn("Create schedule rule failed", error);
+          setToast?.("新增固定課表失敗，請確認後端是否正常");
+          return;
+        }
+      } else {
+        safeSetRules((current) => [
+          ...current,
+          {
+            id: getNextRuleId(current),
+            studentId: ruleOwnerStudent.id,
+            ...payload,
+          },
+        ]);
+      }
       setToast?.("已新增固定課表規則");
     } else if (editingRule) {
-      safeSetRules((current) =>
-        current.map((item) =>
-          item.id === editingRule.id
-            ? {
-                ...item,
-                studentId: ruleOwnerStudent.id,
-                weekday: ruleDraft.weekday,
-                start: ruleDraft.start,
-                durationMin: ruleDraft.durationMin,
-                isActive: ruleDraft.isActive,
-              }
-            : item
-        )
-      );
+      if (isScheduleRulesBackendAvailable) {
+        try {
+          const updatedRule = await updateScheduleRule(editingRule.id, payload);
+          safeSetRules((current) =>
+            current.map((item) => (item.id === editingRule.id ? updatedRule : item))
+          );
+        } catch (error) {
+          console.warn("Update schedule rule failed", error);
+          setToast?.("更新固定課表失敗，請確認後端是否正常");
+          return;
+        }
+      } else {
+        safeSetRules((current) =>
+          current.map((item) =>
+            item.id === editingRule.id
+              ? {
+                  ...item,
+                  studentId: ruleOwnerStudent.id,
+                  ...payload,
+                }
+              : item
+          )
+        );
+      }
       setToast?.("已更新固定課表規則");
     }
 
     closeRuleEditor();
   }
 
-  function toggleRuleActive(rule: StudentScheduleRule, isActive: boolean) {
-    safeSetRules((current) =>
-      current.map((item) => (item.id === rule.id ? { ...item, isActive } : item))
-    );
+  async function toggleRuleActive(rule: StudentScheduleRule, isActive: boolean) {
+    if (isScheduleRulesBackendAvailable) {
+      try {
+        const updatedRule = await updateScheduleRule(rule.id, { isActive });
+        safeSetRules((current) =>
+          current.map((item) => (item.id === rule.id ? updatedRule : item))
+        );
+      } catch (error) {
+        console.warn("Toggle schedule rule failed", error);
+        setToast?.("更新固定課表狀態失敗，請確認後端是否正常");
+        return;
+      }
+    } else {
+      safeSetRules((current) =>
+        current.map((item) => (item.id === rule.id ? { ...item, isActive } : item))
+      );
+    }
     setToast?.(isActive ? "已恢復固定課表規則" : "已停用固定課表規則");
   }
 
@@ -642,8 +687,18 @@ export default function StudentsPage({
     setRuleDeleteOpen(false);
   }
 
-  function confirmRuleDelete() {
+  async function confirmRuleDelete() {
     if (!ruleDeleteTarget) return;
+
+    if (isScheduleRulesBackendAvailable) {
+      try {
+        await deleteScheduleRule(ruleDeleteTarget.id);
+      } catch (error) {
+        console.warn("Delete schedule rule failed", error);
+        setToast?.("刪除固定課表失敗，請確認後端是否正常");
+        return;
+      }
+    }
 
     safeSetRules((current) => current.filter((item) => item.id !== ruleDeleteTarget.id));
     setToast?.("已刪除固定課表規則");

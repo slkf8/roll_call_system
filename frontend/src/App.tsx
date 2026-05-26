@@ -4,6 +4,7 @@ import MonthPage from "./pages/MonthPage";
 import StudentsPage from "./pages/StudentsPage";
 import DataPage from "./pages/DataPage";
 import { fetchStudents } from "./api/studentsApi";
+import { fetchScheduleRules } from "./api/scheduleRulesApi";
 import type {
   TabKey,
   TabDef,
@@ -394,6 +395,7 @@ export default function App() {
     return studentProfilesSeed;
   });
   const [isStudentsBackendAvailable, setIsStudentsBackendAvailable] = useState(false);
+  const [isScheduleRulesBackendAvailable, setIsScheduleRulesBackendAvailable] = useState(false);
 
   const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
     if (restoredData) {
@@ -407,15 +409,37 @@ export default function App() {
     let cancelled = false;
 
     fetchStudents()
-      .then((backendStudents) => {
-        if (!cancelled) {
-          setIsStudentsBackendAvailable(true);
-          setStudents(backendStudents);
+      .then(async (backendStudents) => {
+        if (cancelled) return;
+
+        setIsStudentsBackendAvailable(true);
+        setStudents(backendStudents);
+
+        if (backendStudents.length === 0) {
+          setStudentScheduleRules([]);
+          setIsScheduleRulesBackendAvailable(true);
+          return;
+        }
+
+        try {
+          const backendRulesByStudent = await Promise.all(
+            backendStudents.map((student) => fetchScheduleRules(student.id))
+          );
+          if (!cancelled) {
+            setStudentScheduleRules(backendRulesByStudent.flat());
+            setIsScheduleRulesBackendAvailable(true);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setIsScheduleRulesBackendAvailable(false);
+          }
+          console.warn("Backend schedule rules unavailable, using local data", error);
         }
       })
       .catch((error) => {
         if (!cancelled) {
           setIsStudentsBackendAvailable(false);
+          setIsScheduleRulesBackendAvailable(false);
         }
         console.warn("Backend students unavailable, using local data", error);
       });
@@ -514,6 +538,7 @@ export default function App() {
               students={students}
               setStudents={setStudents}
               isStudentsBackendAvailable={isStudentsBackendAvailable}
+              isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
               studentScheduleRules={studentScheduleRules}
               setStudentScheduleRules={setStudentScheduleRules}
               sessions={sessions}

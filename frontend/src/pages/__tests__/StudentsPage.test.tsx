@@ -123,12 +123,14 @@ function StudentsPageHarness({
   initialRules = makeRules(),
   initialSessions = makeSessions(),
   isStudentsBackendAvailable = false,
+  isScheduleRulesBackendAvailable = false,
   onSnapshot,
 }: {
   initialStudents?: StudentProfile[];
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
   isStudentsBackendAvailable?: boolean;
+  isScheduleRulesBackendAvailable?: boolean;
   onSnapshot: (snapshot: Snapshot) => void;
 }) {
   const [students, setStudents] = useState(initialStudents);
@@ -154,6 +156,7 @@ function StudentsPageHarness({
       students={students}
       setStudents={setStudents}
       isStudentsBackendAvailable={isStudentsBackendAvailable}
+      isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
       studentScheduleRules={rules}
       setStudentScheduleRules={setRules}
       sessions={sessions}
@@ -168,6 +171,7 @@ function renderStudentsPage(options: {
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
   isStudentsBackendAvailable?: boolean;
+  isScheduleRulesBackendAvailable?: boolean;
 } = {}) {
   let snapshot: Snapshot = {
     students: [],
@@ -244,6 +248,19 @@ function backendStudentResponse(overrides: Partial<StudentProfile>) {
     status: overrides.status ?? "active",
     deactivateMode: overrides.deactivateMode ?? null,
     deactivateOn: overrides.deactivateOn ?? null,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+  };
+}
+
+function backendRuleResponse(overrides: Partial<StudentScheduleRule>) {
+  return {
+    id: overrides.id ?? 701,
+    studentId: overrides.studentId ?? 1,
+    weekday: overrides.weekday ?? 1,
+    start: overrides.start ?? "16:00",
+    durationMin: overrides.durationMin ?? 60,
+    isActive: overrides.isActive ?? true,
     createdAt: "2026-05-25T10:00:00",
     updatedAt: "2026-05-25T10:00:00",
   };
@@ -744,6 +761,86 @@ describe("StudentsPage", () => {
     expect(within(getStudentCard("李小欣")).getByText("共 0 條規則")).toBeInTheDocument();
   });
 
+  it("creates a schedule rule through backend when backend rules are available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendRuleResponse({
+            id: 888,
+            studentId: 1,
+            weekday: 5,
+            start: "18:30",
+            durationMin: 45,
+            isActive: true,
+          }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialRules: [],
+      isScheduleRulesBackendAvailable: true,
+    });
+
+    await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "新增固定課表" }));
+    await user.selectOptions(screen.getByRole("combobox"), "5");
+    fireEvent.change(screen.getByDisplayValue("16:00"), { target: { value: "18:30" } });
+    const durationInput = screen.getByRole("spinbutton");
+    await user.clear(durationInput);
+    await user.type(durationInput, "45");
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.rules).toEqual([
+        expect.objectContaining({
+          id: 888,
+          studentId: 1,
+          weekday: 5,
+          start: "18:30",
+          durationMin: 45,
+          isActive: true,
+        }),
+      ])
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/1/schedule-rules",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          weekday: 5,
+          start: "18:30",
+          durationMin: 45,
+          isActive: true,
+        }),
+      })
+    );
+  });
+
+  it("does not create a local schedule rule when backend create fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialRules: [],
+      isScheduleRulesBackendAvailable: true,
+    });
+
+    await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "新增固定課表" }));
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("新增固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.rules).toEqual([]);
+    expect(screen.getAllByText("新增固定課表").length).toBeGreaterThan(0);
+  });
+
   it("creates a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
 
@@ -772,6 +869,30 @@ describe("StudentsPage", () => {
     expect(snapshot.toasts).toContain("已新增固定課表規則");
   });
 
+  it("does not update a schedule rule when backend update fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
+
+    await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "編輯" })[0]);
+    fireEvent.change(screen.getByDisplayValue("16:00"), { target: { value: "19:15" } });
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("更新固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.rules.find((rule) => rule.id === 101)).toEqual(
+      expect.objectContaining({ start: "16:00", durationMin: 60 })
+    );
+  });
+
   it("edits a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
 
@@ -790,6 +911,36 @@ describe("StudentsPage", () => {
     expect(snapshot.toasts).toContain("已更新固定課表規則");
   });
 
+  it("toggles a schedule rule through backend when backend rules are available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendRuleResponse({
+            id: 101,
+            studentId: 1,
+            weekday: 1,
+            start: "16:00",
+            durationMin: 60,
+            isActive: false,
+          }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
+
+    await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "停用" })[0]);
+
+    await waitFor(() => expect(snapshot.rules.find((rule) => rule.id === 101)?.isActive).toBe(false));
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/schedule-rules/101",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ isActive: false }),
+      })
+    );
+  });
+
   it("deactivates and restores a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
     const card = getStudentCard("陳小明");
@@ -801,6 +952,28 @@ describe("StudentsPage", () => {
     await user.click(within(card).getAllByRole("button", { name: "恢復" })[0]);
     await waitFor(() => expect(snapshot.rules.find((rule) => rule.id === 101)?.isActive).toBe(true));
     expect(snapshot.toasts).toContain("已恢復固定課表規則");
+  });
+
+  it("does not delete a schedule rule when backend delete fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
+
+    await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "刪除" })[0]);
+    await user.click(screen.getByRole("button", { name: "確認刪除" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("刪除固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.rules.some((rule) => rule.id === 101)).toBe(true);
+    expect(screen.getByText("刪除固定課表規則")).toBeInTheDocument();
   });
 
   it("deletes a schedule rule after confirmation", async () => {
