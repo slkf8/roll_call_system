@@ -390,7 +390,7 @@ export default function TodayPage({
     setMakeupOpen(true);
   }
 
-  function createMakeup() {
+  async function createMakeup() {
     if (!selected) return;
 
     if (selected.studentId == null) {
@@ -427,6 +427,37 @@ export default function TodayPage({
 
     const candidates = getConflictCandidates(sessions, mkDate, globalEvents);
     const conflicts = candidates.filter(other => checkOverlap(newSession, other));
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const createdSession = await createSession({
+          studentId: selected.studentId,
+          dateISO: mkDate,
+          start: mkStart,
+          durationMin: 60,
+          status: "pending",
+          reason: null,
+          note: null,
+          kind: mkPurpose === "makeup" ? "makeup" : "extra",
+          makeupOfDateISO: mkPurpose === "makeup" ? selected.dateISO : null,
+          makeupOfSessionId: mkPurpose === "makeup" ? selected.id : null,
+          scheduleRuleId: null,
+        });
+
+        setSessions((prev) => [...prev, createdSession]);
+
+        if (conflicts.length > 0) {
+          setToast(formatConflictSummary([createdSession, ...conflicts]));
+        } else {
+          setToast(mkPurpose === "makeup" ? "已建立補課" : "已建立加課");
+        }
+        setMakeupOpen(false);
+      } catch (error) {
+        console.warn("Backend makeup session create failed", error);
+        setToast(mkPurpose === "makeup" ? "建立補課失敗，請確認後端是否正常" : "建立加課失敗，請確認後端是否正常");
+      }
+      return;
+    }
 
     setSessions((prev) => [...prev, newSession]);
     

@@ -1,6 +1,6 @@
 import { useState, useMemo, useContext, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { deleteSession, updateSession } from "../api/sessionsApi";
+import { createSession, deleteSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 
 // ==========================================
@@ -440,7 +440,7 @@ const calculateDayConflicts = (
     setSheetEditFor(null);
   };
 
-  const handleMakeupSubmit = () => {
+  const handleMakeupSubmit = async () => {
     if (!sheetMakeupFor) return;
 
     if (
@@ -451,9 +451,41 @@ const calculateDayConflicts = (
       return;
     }
 
+    const isMakeup = mkPurpose === "makeup";
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const createdSession = await createSession({
+          studentId: sheetMakeupFor.studentId,
+          dateISO: mkDate,
+          start: mkStart,
+          durationMin: sheetMakeupFor.durationMin,
+          status: "pending",
+          reason: null,
+          note: null,
+          kind: isMakeup ? "makeup" : "extra",
+          makeupOfDateISO: isMakeup ? sheetMakeupFor.sourceDateISO ?? null : null,
+          makeupOfSessionId: isMakeup ? sheetMakeupFor.sourceSessionId ?? null : null,
+          scheduleRuleId: null,
+        });
+
+        setSessions((prev) => {
+          const safePrev = prev || [];
+          const nextSessions = [...safePrev, createdSession];
+          checkConflictsWithOthers(createdSession, nextSessions);
+          return nextSessions;
+        });
+
+        setSheetMakeupFor(null);
+      } catch (error) {
+        console.warn("Backend makeup session create failed", error);
+        setToast(isMakeup ? "建立補課失敗，請確認後端是否正常" : "建立加課失敗，請確認後端是否正常");
+      }
+      return;
+    }
+
     setSessions((prev) => {
       const safePrev = prev || [];
-      const isMakeup = mkPurpose === "makeup";
 
       const newSession: Session = {
         id: getNextSessionId(safePrev),

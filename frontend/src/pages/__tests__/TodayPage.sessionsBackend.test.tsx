@@ -396,4 +396,155 @@ describe("TodayPage backend session status updates", () => {
       expect(latestSessions.some((s) => s.id === 10)).toBe(false);
     });
   });
+
+  it("creates a makeup session through backend POST with source link", async () => {
+    vi.mocked(createSession).mockResolvedValueOnce({
+      id: 88,
+      studentId: 1,
+      student: { id: 1, name: "後端課次學生" },
+      dateISO: "2026-06-01",
+      start: "17:00",
+      durationMin: 60,
+      status: "pending",
+      reason: undefined,
+      note: undefined,
+      kind: "makeup",
+      makeupOfDateISO: "2026-06-01",
+      makeupOfSessionId: 10,
+      scheduleRuleId: undefined,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("安排補課（補回本堂）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        studentId: 1,
+        dateISO: "2026-06-01",
+        start: "17:00",
+        durationMin: 60,
+        status: "pending",
+        reason: null,
+        note: null,
+        kind: "makeup",
+        makeupOfDateISO: "2026-06-01",
+        makeupOfSessionId: 10,
+        scheduleRuleId: null,
+      });
+      expect(document.body).toHaveTextContent("補課（原 2026-06-01）");
+    });
+  });
+
+  it("does not add a local makeup session when backend create fails", async () => {
+    const setToast = vi.fn();
+    vi.mocked(createSession).mockRejectedValueOnce(new Error("makeup create failed"));
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("安排補課（補回本堂）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(setToast).toHaveBeenCalledWith("建立補課失敗，請確認後端是否正常");
+    });
+    expect(screen.getAllByLabelText("記錄已到")).toHaveLength(1);
+    expect(screen.getByText("安排補課")).toBeInTheDocument();
+  });
+
+  it("keeps local makeup creation when sessions backend is unavailable", async () => {
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("安排補課（補回本堂）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
+      expect(document.body).toHaveTextContent("補課（原 2026-06-01）");
+    });
+  });
+
+  it("creates an extra session through backend POST without makeup link", async () => {
+    vi.mocked(createSession).mockResolvedValueOnce({
+      id: 89,
+      studentId: 1,
+      student: { id: 1, name: "後端課次學生" },
+      dateISO: "2026-06-01",
+      start: "17:00",
+      durationMin: 60,
+      status: "pending",
+      reason: undefined,
+      note: undefined,
+      kind: "extra",
+      makeupOfDateISO: undefined,
+      makeupOfSessionId: undefined,
+      scheduleRuleId: undefined,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("額外加課（不抵扣缺席）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        studentId: 1,
+        dateISO: "2026-06-01",
+        start: "17:00",
+        durationMin: 60,
+        status: "pending",
+        reason: null,
+        note: null,
+        kind: "extra",
+        makeupOfDateISO: null,
+        makeupOfSessionId: null,
+        scheduleRuleId: null,
+      });
+      expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
+    });
+  });
+
+  it("does not add a local extra session when backend create fails", async () => {
+    const setToast = vi.fn();
+    vi.mocked(createSession).mockRejectedValueOnce(new Error("extra create failed"));
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("額外加課（不抵扣缺席）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(setToast).toHaveBeenCalledWith("建立加課失敗，請確認後端是否正常");
+    });
+    expect(screen.getAllByLabelText("記錄已到")).toHaveLength(1);
+    expect(screen.getByText("安排加課")).toBeInTheDocument();
+  });
+
+  it("keeps local extra creation when sessions backend is unavailable", async () => {
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("額外加課（不抵扣缺席）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
+    });
+  });
 });
