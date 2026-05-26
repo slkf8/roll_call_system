@@ -3,13 +3,14 @@ import * as React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSession, updateSession } from "../../api/sessionsApi";
+import { createSession, deleteSession, updateSession } from "../../api/sessionsApi";
 import type { Session, StudentProfile } from "../../shared/appShared";
 import TodayPage from "../TodayPage";
 
 
 vi.mock("../../api/sessionsApi", () => ({
   createSession: vi.fn(),
+  deleteSession: vi.fn(),
   updateSession: vi.fn(),
 }));
 
@@ -33,15 +34,36 @@ const baseSession: Session = {
   kind: "regular",
 };
 
+const linkedMakeupSession: Session = {
+  id: 11,
+  studentId: 1,
+  student: { id: 1, name: "後端課次學生" },
+  dateISO: "2026-06-01",
+  start: "18:00",
+  durationMin: 60,
+  status: "pending",
+  kind: "makeup",
+  makeupOfDateISO: "2026-06-01",
+  makeupOfSessionId: 10,
+};
+
 
 function TodayHarness({
   isSessionsBackendAvailable,
   setToast = vi.fn(),
+  initialSessions = [baseSession],
+  onSessionsChange,
 }: {
   isSessionsBackendAvailable: boolean;
   setToast?: React.Dispatch<React.SetStateAction<string>>;
+  initialSessions?: Session[];
+  onSessionsChange?: (sessions: Session[]) => void;
 }) {
-  const [sessions, setSessions] = React.useState<Session[]>([baseSession]);
+  const [sessions, setSessions] = React.useState<Session[]>(initialSessions);
+
+  React.useEffect(() => {
+    onSessionsChange?.(sessions);
+  }, [onSessionsChange, sessions]);
 
   return (
     <TodayPage
@@ -290,6 +312,88 @@ describe("TodayPage backend session status updates", () => {
     await waitFor(() => {
       expect(document.body).toHaveTextContent("1小時1分鐘課程");
       expect(document.body).toHaveTextContent("17:01");
+    });
+  });
+
+  it("deletes a session through backend DELETE and detaches linked makeup sessions", async () => {
+    let latestSessions: Session[] = [];
+    vi.mocked(deleteSession).mockResolvedValueOnce({
+      ok: true,
+      detachedMakeupCount: 1,
+    });
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={true}
+        initialSessions={[baseSession, linkedMakeupSession]}
+        onSessionsChange={(next) => {
+          latestSessions = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getAllByLabelText("更多")[0]);
+    await user.click(screen.getByText("刪除此課次"));
+    await user.click(screen.getByRole("button", { name: "刪除" }));
+
+    await waitFor(() => {
+      expect(deleteSession).toHaveBeenCalledWith(10);
+      expect(latestSessions.some((s) => s.id === 10)).toBe(false);
+      expect(latestSessions.find((s) => s.id === 11)?.makeupOfSessionId).toBeUndefined();
+    });
+  });
+
+  it("does not delete a local session when backend DELETE fails", async () => {
+    const setToast = vi.fn();
+    let latestSessions: Session[] = [];
+    vi.mocked(deleteSession).mockRejectedValueOnce(new Error("delete failed"));
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={true}
+        setToast={setToast}
+        initialSessions={[baseSession]}
+        onSessionsChange={(next) => {
+          latestSessions = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("刪除此課次"));
+    await user.click(screen.getByRole("button", { name: "刪除" }));
+
+    await waitFor(() => {
+      expect(deleteSession).toHaveBeenCalledWith(10);
+      expect(setToast).toHaveBeenCalledWith("刪除課次失敗，請確認後端是否正常");
+    });
+    expect(latestSessions.some((s) => s.id === 10)).toBe(true);
+    expect(screen.getByText("刪除課次？")).toBeInTheDocument();
+  });
+
+  it("keeps local delete flow when sessions backend is unavailable", async () => {
+    let latestSessions: Session[] = [];
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[baseSession]}
+        onSessionsChange={(next) => {
+          latestSessions = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("刪除此課次"));
+    await user.click(screen.getByRole("button", { name: "刪除" }));
+
+    expect(deleteSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(latestSessions.some((s) => s.id === 10)).toBe(false);
     });
   });
 });

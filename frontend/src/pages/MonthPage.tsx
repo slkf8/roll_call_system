@@ -1,6 +1,6 @@
 import { useState, useMemo, useContext, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { updateSession } from "../api/sessionsApi";
+import { deleteSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 
 // ==========================================
@@ -479,7 +479,7 @@ const calculateDayConflicts = (
     setSheetMakeupFor(null);
   };
 
-const handleDeleteSubmit = () => {
+const handleDeleteSubmit = async () => {
   if (!sheetDeleteFor) return;
 
   const deleteTarget = sheetDeleteFor;
@@ -494,7 +494,18 @@ const handleDeleteSubmit = () => {
   const linkedMakeups = sessions.filter(
     (s) => s.makeupOfSessionId === deleteTarget.id
   );
-  const detachedCount = linkedMakeups.length;
+  let detachedCount = linkedMakeups.length;
+
+  if (isSessionsBackendAvailable) {
+    try {
+      const result = await deleteSession(deleteTarget.id);
+      detachedCount = result.detachedMakeupCount;
+    } catch (error) {
+      console.warn("Backend session delete failed", error);
+      setToast("刪除課次失敗，請確認後端是否正常");
+      return;
+    }
+  }
 
   setSessions((prev) => {
     const safePrev = prev || [];

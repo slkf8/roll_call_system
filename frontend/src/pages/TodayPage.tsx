@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { createSession, updateSession } from "../api/sessionsApi";
+import { createSession, deleteSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 import type {
   Session,
@@ -314,12 +314,23 @@ export default function TodayPage({
     setDeleteOpen(true);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTarget) return;
     const kindText = deleteTarget.kind === "makeup" ? "補課" : deleteTarget.kind === "extra" ? "加課" : "課次";
     
     const linkedMakeups = sessions.filter(s => s.makeupOfSessionId === deleteTarget.id);
-    const detachedCount = linkedMakeups.length;
+    let detachedCount = linkedMakeups.length;
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const result = await deleteSession(deleteTarget.id);
+        detachedCount = result.detachedMakeupCount;
+      } catch (error) {
+        console.warn("Backend session delete failed", error);
+        setToast("刪除課次失敗，請確認後端是否正常");
+        return;
+      }
+    }
 
     setSessions((prev) => {
       return prev.filter((s) => s.id !== deleteTarget.id).map(s => {
