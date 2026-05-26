@@ -1,5 +1,7 @@
 import { useState, useMemo, useContext, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { updateSession } from "../api/sessionsApi";
+import type { SessionUpdatePayload } from "../api/sessionsApi";
 
 // ==========================================
 // 匯入 Shared 層內容 (對齊現有專案結構)
@@ -59,6 +61,7 @@ export interface MonthPageProps {
   students: StudentProfile[];
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
+  isSessionsBackendAvailable: boolean;
   globalEvents: GlobalEvent[];
   setGlobalEvents: Dispatch<SetStateAction<GlobalEvent[]>>;
   setToast: Dispatch<SetStateAction<string>>;
@@ -140,6 +143,7 @@ export default function MonthPage({
   students,
   sessions,
   setSessions,
+  isSessionsBackendAvailable,
   globalEvents,
   setGlobalEvents,
   setToast,
@@ -310,14 +314,49 @@ const calculateDayConflicts = (
     setActiveMenuId(null);
   }
 
-  const handleMarkStatus = (
+  function reasonToPayload(reason: Partial<Session>["reason"] | string | null | undefined) {
+    if (typeof reason === "string") return reason;
+    if (reason) return reason.name;
+    return null;
+  }
+
+  function buildStatusPayload(
+    newStatus: Session["status"],
+    extraData: Partial<Session>
+  ): SessionUpdatePayload {
+    const payload: SessionUpdatePayload = { status: newStatus };
+
+    if ("reason" in extraData) {
+      payload.reason = reasonToPayload(extraData.reason);
+    }
+    if ("note" in extraData) {
+      payload.note = extraData.note || null;
+    }
+
+    return payload;
+  }
+
+  const handleMarkStatus = async (
     id: Session["id"],
     newStatus: Session["status"],
     extraData: Partial<Session> = {}
-  ) => {
-    setSessions((prev) =>
-      (prev || []).map((s) => (s.id === id ? { ...s, status: newStatus, ...extraData } : s))
-    );
+  ): Promise<boolean> => {
+    if (!isSessionsBackendAvailable) {
+      setSessions((prev) =>
+        (prev || []).map((s) => (s.id === id ? { ...s, status: newStatus, ...extraData } : s))
+      );
+      return true;
+    }
+
+    try {
+      const updated = await updateSession(id as number, buildStatusPayload(newStatus, extraData));
+      setSessions((prev) => (prev || []).map((s) => (s.id === updated.id ? updated : s)));
+      return true;
+    } catch (error) {
+      console.warn("Backend session update failed", error);
+      setToast("點名更新失敗，請確認後端是否正常");
+      return false;
+    }
   };
 
   function openAbsent(id: string | number) {
@@ -1293,7 +1332,7 @@ const handleBatchClearHoliday = () => {
                                 setToast(`⚠️ 本節已被「${formatGlobalAlert(event)}」覆蓋，已鎖定操作`);
                                 return;
                               }
-                              handleMarkStatus(session.id, "present", {
+                              void handleMarkStatus(session.id, "present", {
                                 reason: undefined,
                                 note: undefined,
                               });
@@ -1310,7 +1349,7 @@ const handleBatchClearHoliday = () => {
                                 setToast(`⚠️ 本節已被「${formatGlobalAlert(event)}」覆蓋，已鎖定操作`);
                                 return;
                               }
-                              handleMarkStatus(session.id, "pending", {
+                              void handleMarkStatus(session.id, "pending", {
                                 reason: undefined,
                                 note: undefined,
                               });
@@ -1355,13 +1394,14 @@ const handleBatchClearHoliday = () => {
                                   const nextStatus: Session["status"] =
                                     session.status === "cancelled" ? "pending" : "cancelled";
 
-                                  handleMarkStatus(session.id, nextStatus);
-
-                                  setToast(
-                                    nextStatus === "cancelled"
-                                      ? `已將 ${getSessionStudentName(session)} ${session.start} 標記為單堂停課`
-                                      : `已取消 ${getSessionStudentName(session)} ${session.start} 的單堂停課`
-                                  );
+                                  void handleMarkStatus(session.id, nextStatus).then((ok) => {
+                                    if (!ok) return;
+                                    setToast(
+                                      nextStatus === "cancelled"
+                                        ? `已將 ${getSessionStudentName(session)} ${session.start} 標記為單堂停課`
+                                        : `已取消 ${getSessionStudentName(session)} ${session.start} 的單堂停課`
+                                    );
+                                  });
                                 },
                               },
                               {
@@ -1617,12 +1657,14 @@ const handleBatchClearHoliday = () => {
                   key={r.id}
                   onClick={() => {
                     if (!absentTarget) return;
-                    handleMarkStatus(absentTarget.id, "absent", {
+                    void handleMarkStatus(absentTarget.id, "absent", {
                       reason: r,
                       note: absentNote || undefined,
+                    }).then((ok) => {
+                      if (!ok) return;
+                      setToast(`${getSessionStudentName(absentTarget)} ${absentTarget.start} 缺席：${r.name}`);
+                      setSheetAbsentFor(null);
                     });
-                    setToast(`${getSessionStudentName(absentTarget)} ${absentTarget.start} 缺席：${r.name}`);
-                    setSheetAbsentFor(null);
                   }}
                   className={`rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
                     isDark

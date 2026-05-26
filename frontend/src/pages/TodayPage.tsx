@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { updateSession } from "../api/sessionsApi";
+import type { SessionUpdatePayload } from "../api/sessionsApi";
 import type {
   Session,
   GlobalEvent,
@@ -49,6 +51,7 @@ export interface TodayPageProps {
   students: StudentProfile[];
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
+  isSessionsBackendAvailable: boolean;
   globalEvents: GlobalEvent[];
   setGlobalEvents: Dispatch<SetStateAction<GlobalEvent[]>>;
   setToast: Dispatch<SetStateAction<string>>;
@@ -62,6 +65,7 @@ export default function TodayPage({
   students,
   sessions,
   setSessions,
+  isSessionsBackendAvailable,
   globalEvents,
   setGlobalEvents,
   setToast
@@ -245,6 +249,65 @@ export default function TodayPage({
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }
 
+  type AttendancePatch = {
+    status?: Session["status"];
+    reason?: Reason | string | null;
+    note?: string | null;
+  };
+
+  function toBackendAttendancePatch(patch: AttendancePatch): SessionUpdatePayload {
+    const payload: SessionUpdatePayload = {};
+
+    if (patch.status) payload.status = patch.status;
+    if ("reason" in patch) {
+      payload.reason =
+        typeof patch.reason === "string"
+          ? patch.reason
+          : patch.reason
+          ? patch.reason.name
+          : null;
+    }
+    if ("note" in patch) {
+      payload.note = patch.note || null;
+    }
+
+    return payload;
+  }
+
+  function toLocalAttendancePatch(patch: AttendancePatch): Partial<Session> {
+    return {
+      ...(patch.status ? { status: patch.status } : {}),
+      ...("reason" in patch
+        ? { reason: typeof patch.reason === "string" || patch.reason == null ? undefined : patch.reason }
+        : {}),
+      ...("note" in patch ? { note: patch.note || undefined } : {}),
+    };
+  }
+
+  async function updateAttendanceSession(
+    session: Session,
+    patch: AttendancePatch,
+    successToast: string,
+    onSuccess?: () => void
+  ) {
+    if (!isSessionsBackendAvailable) {
+      patchSession(session.id, toLocalAttendancePatch(patch));
+      setToast(successToast);
+      onSuccess?.();
+      return;
+    }
+
+    try {
+      const updated = await updateSession(session.id, toBackendAttendancePatch(patch));
+      setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setToast(successToast);
+      onSuccess?.();
+    } catch (error) {
+      console.warn("Backend session update failed", error);
+      setToast("點名更新失敗，請確認後端是否正常");
+    }
+  }
+
   function requestDelete(id: number) {
     setMenuOpenId(null);
     setDeleteId(id);
@@ -280,9 +343,12 @@ export default function TodayPage({
 
   function saveAbsentByReason(reason: Reason) {
     if (!selected) return;
-    patchSession(selected.id, { status: "absent", reason, note: absentNote ? absentNote : undefined });
-    setToast(`${getSessionStudentName(selected)} ${selected.start} 缺席：${reason.name}`);
-    setAbsentOpen(false);
+    void updateAttendanceSession(
+      selected,
+      { status: "absent", reason, note: absentNote || null },
+      `${getSessionStudentName(selected)} ${selected.start} 缺席：${reason.name}`,
+      () => setAbsentOpen(false)
+    );
   }
 
   function openMakeupFromMenu(id: number, purpose: "makeup" | "extra") {
@@ -626,8 +692,11 @@ export default function TodayPage({
                           setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
                           return;
                         }
-                        patchSession(s.id, { status: "present", reason: undefined, note: undefined });
-                        setToast(`${getSessionStudentName(s)} ${s.start} 已到`);
+                        void updateAttendanceSession(
+                          s,
+                          { status: "present", reason: null, note: null },
+                          `${getSessionStudentName(s)} ${s.start} 已到`
+                        );
                       }}
                       onAbsent={() => {
                         if (isSessionCovered(s, currentGlobalEvent)) {
@@ -641,8 +710,11 @@ export default function TodayPage({
                           setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
                           return;
                         }
-                        patchSession(s.id, { status: "pending", reason: undefined, note: undefined });
-                        setToast("已撤銷，回到未點名");
+                        void updateAttendanceSession(
+                          s,
+                          { status: "pending", reason: null, note: null },
+                          "已撤銷，回到未點名"
+                        );
                       }}
                       onOpenMenu={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
                     />
@@ -683,12 +755,15 @@ export default function TodayPage({
                         label: s.status === "cancelled" ? "取消停課" : "標記停課",
                         onClick: () => {
                             setMenuOpenId(null);
-                            patchSession(s.id, {
-                            status: s.status === "cancelled" ? "pending" : "cancelled",
-                            reason: undefined,
-                            note: undefined,
-                            });
-                            setToast(s.status === "cancelled" ? "已取消停課" : "已標記停課");
+                            void updateAttendanceSession(
+                              s,
+                              {
+                                status: s.status === "cancelled" ? "pending" : "cancelled",
+                                reason: null,
+                                note: null,
+                              },
+                              s.status === "cancelled" ? "已取消停課" : "已標記停課"
+                            );
                         },
                         danger: true,
                         },
@@ -716,8 +791,11 @@ export default function TodayPage({
                           setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
                           return;
                         }
-                        patchSession(s.id, { status: "present", reason: undefined, note: undefined });
-                        setToast(`${getSessionStudentName(s)} ${s.start} 已到`);
+                        void updateAttendanceSession(
+                          s,
+                          { status: "present", reason: null, note: null },
+                          `${getSessionStudentName(s)} ${s.start} 已到`
+                        );
                       }}
                       onAbsent={() => {
                         if (isSessionCovered(s, currentGlobalEvent)) {
@@ -731,8 +809,11 @@ export default function TodayPage({
                           setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
                           return;
                         }
-                        patchSession(s.id, { status: "pending", reason: undefined, note: undefined });
-                        setToast("已撤銷，回到未點名");
+                        void updateAttendanceSession(
+                          s,
+                          { status: "pending", reason: null, note: null },
+                          "已撤銷，回到未點名"
+                        );
                       }}
                       onOpenMenu={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
                     />
@@ -773,12 +854,15 @@ export default function TodayPage({
                         label: s.status === "cancelled" ? "取消停課" : "標記停課",
                         onClick: () => {
                             setMenuOpenId(null);
-                            patchSession(s.id, {
-                            status: s.status === "cancelled" ? "pending" : "cancelled",
-                            reason: undefined,
-                            note: undefined,
-                            });
-                            setToast(s.status === "cancelled" ? "已取消停課" : "已標記停課");
+                            void updateAttendanceSession(
+                              s,
+                              {
+                                status: s.status === "cancelled" ? "pending" : "cancelled",
+                                reason: null,
+                                note: null,
+                              },
+                              s.status === "cancelled" ? "已取消停課" : "已標記停課"
+                            );
                         },
                         danger: true,
                         },
