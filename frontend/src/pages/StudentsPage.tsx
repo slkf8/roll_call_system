@@ -1,5 +1,6 @@
 import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { createSession } from "../api/sessionsApi";
 import { createStudent, updateStudent } from "../api/studentsApi";
 import type { UpdateStudentPayload } from "../api/studentsApi";
 import {
@@ -50,11 +51,17 @@ type StudentsPageProps = {
   setStudents?: Dispatch<SetStateAction<StudentProfile[]>>;
   isStudentsBackendAvailable?: boolean;
   isScheduleRulesBackendAvailable?: boolean;
+  isSessionsBackendAvailable?: boolean;
   studentScheduleRules?: StudentScheduleRule[];
   setStudentScheduleRules?: Dispatch<SetStateAction<StudentScheduleRule[]>>;
   sessions?: Session[];
   setSessions?: Dispatch<SetStateAction<Session[]>>;
   setToast?: Dispatch<SetStateAction<string>>;
+};
+
+type RegularSessionCandidate = {
+  session: Session;
+  scheduleRuleId: number;
 };
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -218,6 +225,7 @@ export default function StudentsPage({
   setStudents,
   isStudentsBackendAvailable = false,
   isScheduleRulesBackendAvailable = false,
+  isSessionsBackendAvailable = false,
   studentScheduleRules,
   setStudentScheduleRules,
   sessions,
@@ -395,7 +403,7 @@ export default function StudentsPage({
 
     let nextId = getNextSessionId(baseSessions);
     let skippedCount = 0;
-    const generatedSessions: Session[] = [];
+    const generatedSessions: RegularSessionCandidate[] = [];
 
     for (const rule of activeRules) {
       for (const target of dates) {
@@ -409,14 +417,17 @@ export default function StudentsPage({
 
         existingRegularKeys.add(key);
         generatedSessions.push({
-          id: nextId,
-          studentId: student.id,
-          student: toSessionStudent(student),
-          dateISO: target.dateISO,
-          start: rule.start,
-          durationMin: rule.durationMin,
-          status: "pending",
-          kind: "regular",
+          scheduleRuleId: rule.id,
+          session: {
+            id: nextId,
+            studentId: student.id,
+            student: toSessionStudent(student),
+            dateISO: target.dateISO,
+            start: rule.start,
+            durationMin: rule.durationMin,
+            status: "pending",
+            kind: "regular",
+          },
         });
         nextId++;
       }
@@ -428,7 +439,7 @@ export default function StudentsPage({
     };
   }
 
-  function generateRegularSessionsForStudent(student: StudentProfile) {
+  async function generateRegularSessionsForStudent(student: StudentProfile) {
     if (student.status !== "active") {
       setToast?.("只有啟用中的學生可生成 regular 課次");
       return;
@@ -466,7 +477,37 @@ export default function StudentsPage({
       return;
     }
 
-    setSessions((current) => [...current, ...generatedSessions]);
+    if (isSessionsBackendAvailable) {
+      try {
+        const createdSessions = await Promise.all(
+          generatedSessions.map(({ session, scheduleRuleId }) =>
+            createSession({
+              studentId: student.id,
+              dateISO: session.dateISO,
+              start: session.start,
+              durationMin: session.durationMin,
+              status: "pending",
+              reason: null,
+              note: null,
+              kind: "regular",
+              makeupOfDateISO: null,
+              makeupOfSessionId: null,
+              scheduleRuleId,
+            })
+          )
+        );
+        setSessions((current) => [...current, ...createdSessions]);
+      } catch (error) {
+        console.warn("Generate regular sessions failed", error);
+        setToast?.("生成固定課表失敗，請確認後端是否正常");
+        return;
+      }
+    } else {
+      setSessions((current) => [
+        ...current,
+        ...generatedSessions.map(({ session }) => session),
+      ]);
+    }
 
     if (skippedCount > 0) {
       setToast?.(`已生成 ${generatedSessions.length} 堂 regular 課次，略過 ${skippedCount} 堂已存在課次`);
@@ -559,7 +600,7 @@ export default function StudentsPage({
       return;
     }
 
-    setSessions([...keptSessions, ...generatedSessions]);
+    setSessions([...keptSessions, ...generatedSessions.map(({ session }) => session)]);
     setToast?.(`已重新生成 ${generatedSessions.length} 堂 regular 課次`);
   }
 

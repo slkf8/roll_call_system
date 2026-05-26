@@ -556,6 +556,7 @@ export default function App() {
               setStudents={setStudents}
               isStudentsBackendAvailable={isStudentsBackendAvailable}
               isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
+              isSessionsBackendAvailable={isSessionsBackendAvailable}
               studentScheduleRules={studentScheduleRules}
               setStudentScheduleRules={setStudentScheduleRules}
               sessions={sessions}

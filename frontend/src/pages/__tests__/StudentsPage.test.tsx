@@ -124,6 +124,7 @@ function StudentsPageHarness({
   initialSessions = makeSessions(),
   isStudentsBackendAvailable = false,
   isScheduleRulesBackendAvailable = false,
+  isSessionsBackendAvailable = false,
   onSnapshot,
 }: {
   initialStudents?: StudentProfile[];
@@ -131,6 +132,7 @@ function StudentsPageHarness({
   initialSessions?: Session[];
   isStudentsBackendAvailable?: boolean;
   isScheduleRulesBackendAvailable?: boolean;
+  isSessionsBackendAvailable?: boolean;
   onSnapshot: (snapshot: Snapshot) => void;
 }) {
   const [students, setStudents] = useState(initialStudents);
@@ -157,6 +159,7 @@ function StudentsPageHarness({
       setStudents={setStudents}
       isStudentsBackendAvailable={isStudentsBackendAvailable}
       isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
+      isSessionsBackendAvailable={isSessionsBackendAvailable}
       studentScheduleRules={rules}
       setStudentScheduleRules={setRules}
       sessions={sessions}
@@ -172,6 +175,7 @@ function renderStudentsPage(options: {
   initialSessions?: Session[];
   isStudentsBackendAvailable?: boolean;
   isScheduleRulesBackendAvailable?: boolean;
+  isSessionsBackendAvailable?: boolean;
 } = {}) {
   let snapshot: Snapshot = {
     students: [],
@@ -261,6 +265,26 @@ function backendRuleResponse(overrides: Partial<StudentScheduleRule>) {
     start: overrides.start ?? "16:00",
     durationMin: overrides.durationMin ?? 60,
     isActive: overrides.isActive ?? true,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+  };
+}
+
+function backendSessionResponse(overrides: Partial<Session> & { scheduleRuleId?: number }) {
+  return {
+    id: overrides.id ?? 901,
+    studentId: overrides.studentId ?? 1,
+    student: overrides.student ?? { id: 1, name: "陳小明" },
+    dateISO: overrides.dateISO ?? "2026-04-22",
+    start: overrides.start ?? "17:00",
+    durationMin: overrides.durationMin ?? 60,
+    status: overrides.status ?? "pending",
+    reason: null,
+    note: null,
+    kind: overrides.kind ?? "regular",
+    makeupOfDateISO: overrides.makeupOfDateISO ?? null,
+    makeupOfSessionId: overrides.makeupOfSessionId ?? null,
+    scheduleRuleId: overrides.scheduleRuleId ?? null,
     createdAt: "2026-05-25T10:00:00",
     updatedAt: "2026-05-25T10:00:00",
   };
@@ -1011,6 +1035,117 @@ describe("StudentsPage", () => {
       true
     );
     expect(snapshot.sessions.filter((session) => session.studentId === 1 && session.dateISO === "2026-04-20" && session.start === "16:00" && session.kind === "regular")).toHaveLength(1);
+  });
+
+  it("generates remaining monthly regular sessions through backend when sessions backend is available", async () => {
+    const payloads: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body));
+        payloads.push(payload);
+        return {
+          ok: true,
+          json: async () =>
+            backendSessionResponse({
+              id: 900 + payloads.length,
+              studentId: payload.studentId as number,
+              student: { id: 1, name: "陳小明" },
+              dateISO: payload.dateISO as string,
+              start: payload.start as string,
+              durationMin: payload.durationMin as number,
+              kind: "regular",
+              scheduleRuleId: payload.scheduleRuleId as number,
+            }),
+        };
+      })
+    );
+    const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
+    );
+
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          studentId: 1,
+          kind: "regular",
+          reason: null,
+          note: null,
+          makeupOfDateISO: null,
+          makeupOfSessionId: null,
+          scheduleRuleId: 101,
+        }),
+        expect.objectContaining({
+          studentId: 1,
+          kind: "regular",
+          reason: null,
+          note: null,
+          makeupOfDateISO: null,
+          makeupOfSessionId: null,
+          scheduleRuleId: 102,
+        }),
+      ])
+    );
+    expect(payloads.some((payload) => payload.dateISO === "2026-04-20" && payload.start === "16:00")).toBe(false);
+    expect(snapshot.toasts).toContain("已生成 3 堂 regular 課次，略過 1 堂已存在課次");
+  });
+
+  it("does not append local regular sessions when backend regular generation fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body));
+        if (payload.scheduleRuleId === 102) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({}),
+          };
+        }
+        return {
+          ok: true,
+          json: async () =>
+            backendSessionResponse({
+              id: 910,
+              studentId: payload.studentId as number,
+              student: { id: 1, name: "陳小明" },
+              dateISO: payload.dateISO as string,
+              start: payload.start as string,
+              durationMin: payload.durationMin as number,
+              kind: "regular",
+              scheduleRuleId: payload.scheduleRuleId as number,
+            }),
+        };
+      })
+    );
+    const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
+    );
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("生成固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.sessions).toHaveLength(6);
+  });
+
+  it("does not call backend regular generation for inactive students", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
+
+    await user.click(
+      within(getStudentCard("王家朗")).getByRole("button", { name: "生成本月 regular 課次" })
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(snapshot.sessions).toHaveLength(6);
+    await waitFor(() => expect(snapshot.toasts).toContain("只有啟用中的學生可生成 regular 課次"));
   });
 
   it("does not generate regular sessions for inactive students", async () => {
