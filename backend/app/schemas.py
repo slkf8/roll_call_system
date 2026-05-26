@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 StudentStatus = Literal["active", "scheduled_deactivation", "inactive"]
 DeactivateMode = Literal["immediate", "scheduled"]
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
+SessionStatus = Literal["pending", "present", "absent", "cancelled"]
+SessionKind = Literal["regular", "makeup", "extra"]
 
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -33,6 +35,13 @@ def _validate_optional_date(value: str | None) -> str | None:
         raise ValueError("date must use YYYY-MM-DD")
 
     return value
+
+
+def _validate_required_date(value: str) -> str:
+    result = _validate_optional_date(value)
+    if not result:
+        raise ValueError("date must use YYYY-MM-DD")
+    return result
 
 
 def _validate_hhmm(value: str) -> str:
@@ -134,5 +143,92 @@ class StudentScheduleRuleRead(StudentScheduleRuleBase):
 
     id: int
     studentId: int
+    createdAt: str = Field(description="ISO datetime")
+    updatedAt: str = Field(description="ISO datetime")
+
+
+class SessionStudentSnapshot(BaseModel):
+    id: int
+    name: str
+
+
+class SessionBase(BaseModel):
+    studentId: int | None = None
+    dateISO: str
+    start: str
+    durationMin: int = Field(default=60, gt=0)
+    status: SessionStatus = "pending"
+    reason: str | None = None
+    note: str | None = None
+    kind: SessionKind = "regular"
+    makeupOfDateISO: str | None = None
+    makeupOfSessionId: int | None = None
+    scheduleRuleId: int | None = None
+
+    @field_validator("dateISO")
+    @classmethod
+    def validate_date_iso(cls, value: str) -> str:
+        return _validate_required_date(value)
+
+    @field_validator("start")
+    @classmethod
+    def validate_start(cls, value: str) -> str:
+        return _validate_hhmm(value)
+
+    @field_validator("makeupOfDateISO")
+    @classmethod
+    def validate_makeup_of_date(cls, value: str | None) -> str | None:
+        return _validate_optional_date(value)
+
+
+class SessionCreate(SessionBase):
+    pass
+
+
+class SessionUpdate(BaseModel):
+    studentId: int | None = None
+    dateISO: str | None = None
+    start: str | None = None
+    durationMin: int | None = Field(default=None, gt=0)
+    status: SessionStatus | None = None
+    reason: str | None = None
+    note: str | None = None
+    kind: SessionKind | None = None
+    makeupOfDateISO: str | None = None
+    makeupOfSessionId: int | None = None
+    scheduleRuleId: int | None = None
+
+    @field_validator("dateISO")
+    @classmethod
+    def validate_date_iso(cls, value: str | None) -> str | None:
+        return _validate_required_date(value) if value is not None else value
+
+    @field_validator("start")
+    @classmethod
+    def validate_start(cls, value: str | None) -> str | None:
+        return _validate_hhmm(value) if value is not None else value
+
+    @field_validator("makeupOfDateISO")
+    @classmethod
+    def validate_makeup_of_date(cls, value: str | None) -> str | None:
+        return _validate_optional_date(value)
+
+
+class SessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    studentId: int | None
+    student: SessionStudentSnapshot | None
+    dateISO: str
+    start: str
+    durationMin: int
+    status: str
+    reason: str | None
+    note: str | None
+    kind: str
+    makeupOfDateISO: str | None
+    makeupOfSessionId: int | None
+    scheduleRuleId: int | None
     createdAt: str = Field(description="ISO datetime")
     updatedAt: str = Field(description="ISO datetime")

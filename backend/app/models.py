@@ -71,3 +71,76 @@ class StudentScheduleRule(Base):
         Index("idx_rules_student_active", "student_id", "is_active"),
         Index("idx_rules_student_weekday_start", "student_id", "weekday", "start"),
     )
+
+
+class AttendanceSession(Base):
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    date_iso = Column(String, nullable=False)
+    start = Column(String, nullable=False)
+    duration_min = Column(
+        Integer, nullable=False, default=60, server_default=text("60")
+    )
+    status = Column(
+        String,
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    reason = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    kind = Column(
+        String,
+        nullable=False,
+        default="regular",
+        server_default=text("'regular'"),
+    )
+    makeup_of_date_iso = Column(String, nullable=True)
+    makeup_of_session_id = Column(
+        Integer,
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    schedule_rule_id = Column(
+        Integer,
+        ForeignKey("student_schedule_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("duration_min > 0", name="ck_sessions_duration_min"),
+        CheckConstraint(
+            "status IN ('pending', 'present', 'absent', 'cancelled')",
+            name="ck_sessions_status",
+        ),
+        CheckConstraint(
+            "kind IN ('regular', 'makeup', 'extra')",
+            name="ck_sessions_kind",
+        ),
+        Index("idx_sessions_date", "date_iso"),
+        Index("idx_sessions_student_date", "student_id", "date_iso"),
+        Index("idx_sessions_date_start", "date_iso", "start"),
+        Index("idx_sessions_kind", "kind"),
+        Index("idx_sessions_status", "status"),
+        Index("idx_sessions_schedule_rule_id", "schedule_rule_id"),
+        Index("idx_sessions_makeup_of_session_id", "makeup_of_session_id"),
+    )

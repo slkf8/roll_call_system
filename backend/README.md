@@ -60,10 +60,14 @@ Implemented:
 - `POST /api/students/{student_id}/schedule-rules`
 - `PATCH /api/schedule-rules/{rule_id}`
 - `DELETE /api/schedule-rules/{rule_id}`
+- `GET /api/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD&studentId=<id>`
+- `POST /api/sessions`
+- `PATCH /api/sessions/{session_id}`
+- `DELETE /api/sessions/{session_id}` (detaches `makeupOfSessionId` on dependent sessions and returns `detachedMakeupCount`)
 
 Not implemented yet:
 
-- sessions
 - global events
 - statistics
 - Excel export
+- frontend sessions integration
