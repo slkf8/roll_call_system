@@ -70,4 +70,3 @@ Not implemented yet:
 - global events
 - statistics
 - Excel export
-- frontend sessions integration
