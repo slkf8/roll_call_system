@@ -67,5 +67,3 @@ Not implemented yet:
 - global events
 - statistics
 - Excel export
-- frontend API integration beyond students
-- frontend schedule rules integration
