@@ -1387,4 +1387,211 @@ describe("StudentsPage", () => {
       expect(snapshot.toasts).toContain("本月剩餘日期沒有可重新生成的 regular 課次")
     );
   });
+
+  it("regenerates remaining monthly regular sessions through backend when sessions backend is available", async () => {
+    let postCounter = 900;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+        } as Response;
+      }
+      if (init?.method === "POST") {
+        postCounter++;
+        const body = JSON.parse((init?.body as string) ?? "{}") as {
+          studentId: number;
+          dateISO: string;
+          start: string;
+          durationMin: number;
+          kind: Session["kind"];
+          scheduleRuleId: number;
+        };
+        return {
+          ok: true,
+          json: async () =>
+            backendSessionResponse({
+              id: postCounter,
+              studentId: body.studentId,
+              dateISO: body.dateISO,
+              start: body.start,
+              durationMin: body.durationMin,
+              kind: body.kind,
+              scheduleRuleId: body.scheduleRuleId,
+            }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleRegular: Session = {
+      id: 207,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-20",
+      start: "09:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const linkedMakeup: Session = {
+      id: 208,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-28",
+      start: "19:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "makeup",
+      makeupOfSessionId: 201,
+    };
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: [...makeSessions(), staleRegular, linkedMakeup],
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
+    );
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("已重新生成 4 堂 regular 課次")
+    );
+
+    expect(snapshot.sessions.some((s) => s.id === 201)).toBe(false);
+    expect(snapshot.sessions.some((s) => s.id === 207)).toBe(false);
+    expect(snapshot.sessions.some((s) => s.id === 202 && s.kind === "makeup")).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 203 && s.kind === "extra")).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 204)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 205)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 206)).toBe(true);
+    const makeupAfter = snapshot.sessions.find((s) => s.id === 208);
+    expect(makeupAfter).toBeDefined();
+    expect(makeupAfter?.makeupOfSessionId).toBeUndefined();
+    const newSessions = snapshot.sessions.filter((s) => s.id >= 901);
+    expect(newSessions).toHaveLength(4);
+    newSessions.forEach((s) => {
+      expect(s.studentId).toBe(1);
+      expect(s.kind).toBe("regular");
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/201",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/207",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "DELETE"
+    );
+    expect(deleteCalls).toHaveLength(2);
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCalls).toHaveLength(4);
+    postCalls.forEach(([, init]) => {
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.kind).toBe("regular");
+      expect(body.makeupOfDateISO).toBeNull();
+      expect(body.makeupOfSessionId).toBeNull();
+      expect(body.reason).toBeNull();
+      expect(body.note).toBeNull();
+      expect(body.studentId).toBe(1);
+      expect([101, 102]).toContain(body.scheduleRuleId);
+    });
+  });
+
+  it("does not update local sessions when backend regenerate delete fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({}),
+        } as Response;
+      }
+      throw new Error("POST should not be called when DELETE fails");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleRegular: Session = {
+      id: 207,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-20",
+      start: "09:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: [...makeSessions(), staleRegular],
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
+    );
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("重新生成固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.sessions.some((s) => s.id === 201)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 207)).toBe(true);
+    const postCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCalls).toHaveLength(0);
+  });
+
+  it("does not update local sessions when backend regenerate create fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+        } as Response;
+      }
+      if (init?.method === "POST") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({}),
+        } as Response;
+      }
+      throw new Error("unexpected method");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleRegular: Session = {
+      id: 207,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-20",
+      start: "09:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: [...makeSessions(), staleRegular],
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
+    );
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("重新生成固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.sessions.some((s) => s.id === 201)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 207)).toBe(true);
+  });
 });

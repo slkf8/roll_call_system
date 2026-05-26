@@ -563,7 +563,7 @@ export default function StudentsPage({
     setToast?.(`已清除 ${targetSessions.length} 堂 regular 課次`);
   }
 
-  function regenerateRegularSessionsForStudent(student: StudentProfile) {
+  async function regenerateRegularSessionsForStudent(student: StudentProfile) {
     if (student.status !== "active") {
       setToast?.("只有啟用中的學生可生成 regular 課次");
       return;
@@ -589,6 +589,12 @@ export default function StudentsPage({
     }
 
     const baseSessions = sessions ?? [];
+    const deleteTargets = baseSessions.filter(
+      (session) =>
+        session.studentId === student.id &&
+        session.kind === "regular" &&
+        isWithinMonthRemaining(session.dateISO, selectedDate)
+    );
     const keptSessions = baseSessions.filter(
       (session) =>
         !(
@@ -610,7 +616,48 @@ export default function StudentsPage({
       return;
     }
 
-    setSessions([...keptSessions, ...generatedSessions.map(({ session }) => session)]);
+    if (isSessionsBackendAvailable) {
+      let createdSessions: Session[];
+      try {
+        await Promise.all(deleteTargets.map((session) => deleteSession(session.id)));
+        createdSessions = await Promise.all(
+          generatedSessions.map(({ session, scheduleRuleId }) =>
+            createSession({
+              studentId: student.id,
+              dateISO: session.dateISO,
+              start: session.start,
+              durationMin: session.durationMin,
+              status: "pending",
+              reason: null,
+              note: null,
+              kind: "regular",
+              makeupOfDateISO: null,
+              makeupOfSessionId: null,
+              scheduleRuleId,
+            })
+          )
+        );
+      } catch (error) {
+        console.warn("Regenerate regular sessions failed", error);
+        setToast?.("重新生成固定課表失敗，請確認後端是否正常");
+        return;
+      }
+
+      const deletedIds = new Set(deleteTargets.map((session) => session.id));
+      setSessions((current) => [
+        ...current
+          .filter((session) => !deletedIds.has(session.id))
+          .map((session) =>
+            session.makeupOfSessionId !== undefined && deletedIds.has(session.makeupOfSessionId)
+              ? { ...session, makeupOfSessionId: undefined }
+              : session
+          ),
+        ...createdSessions,
+      ]);
+    } else {
+      setSessions([...keptSessions, ...generatedSessions.map(({ session }) => session)]);
+    }
+
     setToast?.(`已重新生成 ${generatedSessions.length} 堂 regular 課次`);
   }
 
