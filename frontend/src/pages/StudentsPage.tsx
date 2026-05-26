@@ -1,6 +1,7 @@
 import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { createStudent } from "../api/studentsApi";
+import { createStudent, updateStudent } from "../api/studentsApi";
+import type { UpdateStudentPayload } from "../api/studentsApi";
 import type { Session, StudentProfile, StudentScheduleRule } from "../shared/appShared";
 import {
   studentProfilesSeed,
@@ -169,6 +170,30 @@ function findDuplicates(list: StudentProfile[], draft: DraftStudent, excludeId?:
   );
 }
 
+function applyStudentPayload(
+  student: StudentProfile,
+  payload: UpdateStudentPayload
+): StudentProfile {
+  const next: StudentProfile = {
+    ...student,
+  };
+
+  if (payload.name !== undefined) next.name = payload.name;
+  if (payload.birthday !== undefined) next.birthday = payload.birthday;
+  if (payload.school !== undefined) next.school = payload.school;
+  if (payload.status !== undefined) next.status = payload.status;
+
+  if ("deactivateMode" in payload) {
+    next.deactivateMode = payload.deactivateMode === null ? undefined : payload.deactivateMode;
+  }
+
+  if ("deactivateOn" in payload) {
+    next.deactivateOn = payload.deactivateOn === null ? undefined : payload.deactivateOn;
+  }
+
+  return next;
+}
+
 function statusDescription(student: StudentProfile) {
   if (student.status === "scheduled_deactivation" && student.deactivateOn) {
     return `將於 ${student.deactivateOn} 起停用，並移除當日及之後的已排課課次`;
@@ -310,6 +335,32 @@ export default function StudentsPage({
     );
 
     return impacted;
+  }
+
+  async function saveStudentUpdate(
+    target: StudentProfile,
+    payload: UpdateStudentPayload,
+    errorMessage: string
+  ) {
+    if (isStudentsBackendAvailable) {
+      try {
+        const updatedStudent = await updateStudent(target.id, payload);
+        safeSetStudents((current) =>
+          current.map((item) => (item.id === target.id ? updatedStudent : item))
+        );
+        return updatedStudent;
+      } catch (error) {
+        console.warn("Update student failed", error);
+        setToast?.(errorMessage);
+        return null;
+      }
+    }
+
+    const updatedStudent = applyStudentPayload(target, payload);
+    safeSetStudents((current) =>
+      current.map((item) => (item.id === target.id ? applyStudentPayload(item, payload) : item))
+    );
+    return updatedStudent;
   }
 
   function getRulesForStudent(studentId: number) {
@@ -711,21 +762,19 @@ export default function StudentsPage({
       }
     } else if (editingStudent) {
       const nextName = draft.name.trim();
-
-      safeSetStudents((current) =>
-        current.map((item) =>
-          item.id === editingStudent.id
-            ? {
-                ...item,
-                name: nextName,
-                birthday: draft.birthday,
-                school: draft.school.trim(),
-              }
-            : item
-        )
+      const updatedStudent = await saveStudentUpdate(
+        editingStudent,
+        {
+          name: nextName,
+          birthday: draft.birthday,
+          school: draft.school.trim(),
+        },
+        "編輯學生失敗，請確認後端是否正常"
       );
 
-      syncLinkedSessionNames(editingStudent.id, nextName);
+      if (!updatedStudent) return;
+
+      syncLinkedSessionNames(editingStudent.id, updatedStudent.name);
     }
 
     closeDuplicateSheet();
@@ -746,7 +795,7 @@ export default function StudentsPage({
     await executeDraftSave();
   }
 
-  function openAction(student: StudentProfile, action: string) {
+  async function openAction(student: StudentProfile, action: string) {
     if (action === "edit") {
       openEditSheet(student);
       return;
@@ -757,18 +806,17 @@ export default function StudentsPage({
         closeEditor();
       }
 
-      safeSetStudents((current) =>
-        current.map((item) =>
-          item.id === student.id
-            ? {
-                ...item,
-                status: "active",
-                deactivateMode: undefined,
-                deactivateOn: undefined,
-              }
-            : item
-        )
+      const updatedStudent = await saveStudentUpdate(
+        student,
+        {
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+        },
+        "取消停用設定失敗，請確認後端是否正常"
       );
+
+      if (!updatedStudent) return;
 
       setToast?.("已取消停用設定，先前已移除的課次不會自動恢復");
       return;
@@ -812,25 +860,24 @@ export default function StudentsPage({
     }
   }
 
-  function applyPendingAction() {
+  async function applyPendingAction() {
     if (!pendingAction) return;
 
     if (pendingAction.kind === "deactivate_immediate") {
       const target = pendingAction.student;
-      const removedCount = removeImmediateLinkedSessions(target.id);
-
-      safeSetStudents((current) =>
-        current.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                status: "inactive",
-                deactivateMode: "immediate",
-                deactivateOn: undefined,
-              }
-            : item
-        )
+      const updatedStudent = await saveStudentUpdate(
+        target,
+        {
+          status: "inactive",
+          deactivateMode: "immediate",
+          deactivateOn: null,
+        },
+        "停用學生失敗，請確認後端是否正常"
       );
+
+      if (!updatedStudent) return;
+
+      const removedCount = removeImmediateLinkedSessions(target.id);
 
       setToast?.(`已立即停用，移除 ${removedCount} 堂已關聯未來課次`);
     }
@@ -847,39 +894,36 @@ export default function StudentsPage({
       }
 
       const target = pendingAction.student;
-      const removedCount = removeScheduledLinkedSessions(target.id, trimmed);
-
-      safeSetStudents((current) =>
-        current.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                status: "scheduled_deactivation",
-                deactivateMode: "scheduled",
-                deactivateOn: trimmed,
-              }
-            : item
-        )
+      const updatedStudent = await saveStudentUpdate(
+        target,
+        {
+          status: "scheduled_deactivation",
+          deactivateMode: "scheduled",
+          deactivateOn: trimmed,
+        },
+        "停用學生失敗，請確認後端是否正常"
       );
+
+      if (!updatedStudent) return;
+
+      const removedCount = removeScheduledLinkedSessions(target.id, trimmed);
 
       setToast?.(`已設定停用，移除 ${removedCount} 堂已關聯課次`);
     }
 
     if (pendingAction.kind === "restore") {
       const target = pendingAction.student;
-
-      safeSetStudents((current) =>
-        current.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                status: "active",
-                deactivateMode: undefined,
-                deactivateOn: undefined,
-              }
-            : item
-        )
+      const updatedStudent = await saveStudentUpdate(
+        target,
+        {
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+        },
+        "恢復學生失敗，請確認後端是否正常"
       );
+
+      if (!updatedStudent) return;
 
       setToast?.("已恢復學生，先前已移除的課次不會自動恢復");
     }
@@ -1570,7 +1614,7 @@ export default function StudentsPage({
               ? "確認設定"
               : "確認停用",
           onClick: () => {
-            applyPendingAction();
+            void applyPendingAction();
           },
           emphasize: true,
         }}

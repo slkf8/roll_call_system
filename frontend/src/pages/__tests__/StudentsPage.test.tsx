@@ -230,6 +230,25 @@ async function fillCreateStudentForm(user: ReturnType<typeof userEvent.setup>, n
   fireEvent.change(inputs[3], { target: { value: "測試學校" } });
 }
 
+async function openStudentEditor(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(within(getStudentCard(name)).getAllByRole("button")[0]);
+  await screen.findByText("基本資料");
+}
+
+function backendStudentResponse(overrides: Partial<StudentProfile>) {
+  return {
+    id: overrides.id ?? 1,
+    name: overrides.name ?? "陳小明",
+    birthday: overrides.birthday ?? "2012-03-08",
+    school: overrides.school ?? "培正中學",
+    status: overrides.status ?? "active",
+    deactivateMode: overrides.deactivateMode ?? null,
+    deactivateOn: overrides.deactivateOn ?? null,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+  };
+}
+
 describe("StudentsPage", () => {
   it("shows an empty state when there are no students", () => {
     renderStudentsPage({
@@ -366,6 +385,356 @@ describe("StudentsPage", () => {
       ])
     );
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("updates a student through backend and syncs linked session names", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendStudentResponse({
+            id: 1,
+            name: "後端改名學生",
+            birthday: "2012-03-08",
+            school: "培正中學",
+            status: "active",
+          }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: true });
+
+    await openStudentEditor(user, "陳小明");
+    fireEvent.change(screen.getByDisplayValue("陳小明"), {
+      target: { value: "後端改名學生" },
+    });
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((student) => student.id === 1)?.name).toBe("後端改名學生")
+    );
+    expect(snapshot.sessions.filter((session) => session.studentId === 1).every((session) => session.student.name === "後端改名學生")).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "後端改名學生",
+          birthday: "2012-03-08",
+          school: "培正中學",
+        }),
+      })
+    );
+  });
+
+  it("keeps local student editing when backend students are unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: false });
+
+    await openStudentEditor(user, "陳小明");
+    fireEvent.change(screen.getByDisplayValue("陳小明"), {
+      target: { value: "本地 fallback 改名" },
+    });
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((student) => student.id === 1)?.name).toBe("本地 fallback 改名")
+    );
+    expect(snapshot.sessions.filter((session) => session.studentId === 1).every((session) => session.student.name === "本地 fallback 改名")).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not update local students or linked sessions when backend edit fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: true });
+
+    await openStudentEditor(user, "陳小明");
+    fireEvent.change(screen.getByDisplayValue("陳小明"), {
+      target: { value: "不應成功" },
+    });
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("編輯學生失敗，請確認後端是否正常"));
+    expect(snapshot.students.find((student) => student.id === 1)?.name).toBe("陳小明");
+    expect(snapshot.sessions.filter((session) => session.studentId === 1).every((session) => session.student.name === "陳小明")).toBe(true);
+  });
+
+  it("deactivates a student through backend before removing linked future sessions", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendStudentResponse({
+            id: 1,
+            name: "陳小明",
+            birthday: "2012-03-08",
+            school: "培正中學",
+            status: "inactive",
+            deactivateMode: "immediate",
+          }),
+      }))
+    );
+    const futureSession: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      initialSessions: [...makeSessions(), futureSession],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "立即停用" }));
+    await user.click(screen.getByRole("button", { name: "確認停用" }));
+
+    await waitFor(() => expect(snapshot.students.find((student) => student.id === 1)?.status).toBe("inactive"));
+    expect(snapshot.sessions.some((session) => session.id === 999)).toBe(false);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "inactive",
+          deactivateMode: "immediate",
+          deactivateOn: null,
+        }),
+      })
+    );
+  });
+
+  it("does not remove linked sessions when backend deactivation fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const futureSession: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      initialSessions: [...makeSessions(), futureSession],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "立即停用" }));
+    await user.click(screen.getByRole("button", { name: "確認停用" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("停用學生失敗，請確認後端是否正常"));
+    expect(snapshot.students.find((student) => student.id === 1)?.status).toBe("active");
+    expect(snapshot.sessions.some((session) => session.id === 999)).toBe(true);
+  });
+
+  it("schedules deactivation through backend before removing sessions from the scheduled date", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendStudentResponse({
+            id: 1,
+            name: "陳小明",
+            birthday: "2012-03-08",
+            school: "培正中學",
+            status: "scheduled_deactivation",
+            deactivateMode: "scheduled",
+            deactivateOn: "2099-02-01",
+          }),
+      }))
+    );
+    const beforeScheduledDate: Session = {
+      id: 998,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-31",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const afterScheduledDate: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-02-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      initialSessions: [...makeSessions(), beforeScheduledDate, afterScheduledDate],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "指定日期停用" }));
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2099-02-01" } });
+    await user.click(screen.getByRole("button", { name: "確認設定" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((student) => student.id === 1)?.status).toBe(
+        "scheduled_deactivation"
+      )
+    );
+    expect(snapshot.students.find((student) => student.id === 1)?.deactivateOn).toBe("2099-02-01");
+    expect(snapshot.sessions.some((session) => session.id === 998)).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 999)).toBe(false);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "scheduled_deactivation",
+          deactivateMode: "scheduled",
+          deactivateOn: "2099-02-01",
+        }),
+      })
+    );
+  });
+
+  it("does not remove scheduled linked sessions when backend scheduled deactivation fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const beforeScheduledDate: Session = {
+      id: 998,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-31",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const afterScheduledDate: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-02-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      initialSessions: [...makeSessions(), beforeScheduledDate, afterScheduledDate],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "指定日期停用" }));
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2099-02-01" } });
+    await user.click(screen.getByRole("button", { name: "確認設定" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("停用學生失敗，請確認後端是否正常"));
+    expect(snapshot.students.find((student) => student.id === 1)?.status).toBe("active");
+    expect(snapshot.sessions.some((session) => session.id === 998)).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 999)).toBe(true);
+  });
+
+  it("cancels scheduled deactivation through backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendStudentResponse({
+            id: 2,
+            name: "李小欣",
+            birthday: "2011-11-21",
+            school: "聖羅撒女子中學",
+            status: "active",
+          }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: true });
+
+    await openStudentEditor(user, "李小欣");
+    await user.click(screen.getByRole("button", { name: "取消停用設定" }));
+
+    await waitFor(() => expect(snapshot.students.find((student) => student.id === 2)?.status).toBe("active"));
+    expect(snapshot.toasts).toContain("已取消停用設定，先前已移除的課次不會自動恢復");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/2",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+        }),
+      })
+    );
+  });
+
+  it("restores an inactive student through backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () =>
+          backendStudentResponse({
+            id: 3,
+            name: "王家朗",
+            birthday: "2012-03-08",
+            school: "澳門坊眾學校",
+            status: "active",
+          }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: true });
+
+    await openStudentEditor(user, "王家朗");
+    await user.click(screen.getByRole("button", { name: "恢復學生" }));
+    await user.click(screen.getByRole("button", { name: "確認恢復" }));
+
+    await waitFor(() => expect(snapshot.students.find((student) => student.id === 3)?.status).toBe("active"));
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/3",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+        }),
+      })
+    );
   });
 
   it("shows schedule rule sections and counts per student", () => {

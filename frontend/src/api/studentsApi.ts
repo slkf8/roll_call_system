@@ -12,6 +12,15 @@ export type CreateStudentPayload = {
   deactivateOn?: string | null;
 };
 
+export type UpdateStudentPayload = {
+  name?: string;
+  birthday?: string;
+  school?: string;
+  status?: StudentProfile["status"];
+  deactivateMode?: StudentProfile["deactivateMode"] | null;
+  deactivateOn?: string | null;
+};
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -79,6 +88,26 @@ export async function createStudent(payload: CreateStudentPayload): Promise<Stud
 
   if (!response.ok) {
     throw new Error(`Failed to create student: ${response.status}`);
+  }
+
+  return parseStudentProfile(await response.json());
+}
+
+
+export async function updateStudent(
+  id: number,
+  payload: UpdateStudentPayload
+): Promise<StudentProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/students/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update student: ${response.status}`);
   }
 
   return parseStudentProfile(await response.json());
