@@ -1229,6 +1229,111 @@ describe("StudentsPage", () => {
     );
   });
 
+  it("clears remaining monthly regular sessions through backend when sessions backend is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+      }))
+    );
+    const sessions: Session[] = [
+      ...makeSessions(),
+      {
+        id: 207,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-04-27",
+        start: "16:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "regular",
+      },
+      {
+        id: 208,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-04-28",
+        start: "19:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "makeup",
+        makeupOfSessionId: 201,
+      },
+    ];
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: sessions,
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
+
+    await waitFor(() =>
+      expect(snapshot.sessions.some((session) => session.id === 201)).toBe(false)
+    );
+    expect(snapshot.sessions.some((session) => session.id === 207)).toBe(false);
+    const makeupAfter = snapshot.sessions.find((session) => session.id === 208);
+    expect(makeupAfter).toBeDefined();
+    expect(makeupAfter?.makeupOfSessionId).toBeUndefined();
+    expect(snapshot.sessions.some((session) => session.id === 202 && session.kind === "makeup")).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 203 && session.kind === "extra")).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 204)).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 205)).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 206)).toBe(true);
+    expect(snapshot.toasts).toContain("已清除 2 堂 regular 課次");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/201",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/207",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("does not remove local regular sessions when backend clear fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sessions: Session[] = [
+      ...makeSessions(),
+      {
+        id: 207,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-04-27",
+        start: "16:00",
+        durationMin: 60,
+        status: "pending",
+        kind: "regular",
+      },
+    ];
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: sessions,
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("清除固定課表失敗，請確認後端是否正常")
+    );
+    expect(snapshot.sessions.some((session) => session.id === 201)).toBe(true);
+    expect(snapshot.sessions.some((session) => session.id === 207)).toBe(true);
+  });
+
   it("regenerates remaining monthly regular sessions without touching makeup or extra", async () => {
     const staleRegular: Session = {
       id: 207,

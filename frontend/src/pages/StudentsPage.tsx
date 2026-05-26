@@ -1,6 +1,6 @@
 import { useContext, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { createSession } from "../api/sessionsApi";
+import { createSession, deleteSession } from "../api/sessionsApi";
 import { createStudent, updateStudent } from "../api/studentsApi";
 import type { UpdateStudentPayload } from "../api/studentsApi";
 import {
@@ -516,7 +516,7 @@ export default function StudentsPage({
     }
   }
 
-  function clearRemainingRegularSessionsForStudent(student: StudentProfile) {
+  async function clearRemainingRegularSessionsForStudent(student: StudentProfile) {
     if (!selectedDate) {
       setToast?.("缺少月份資訊，無法清除 regular 課次");
       return;
@@ -527,30 +527,40 @@ export default function StudentsPage({
       return;
     }
 
-    const removedCount = sessions.filter(
+    const targetSessions = sessions.filter(
       (session) =>
         session.studentId === student.id &&
         session.kind === "regular" &&
         isWithinMonthRemaining(session.dateISO, selectedDate)
-    ).length;
+    );
 
-    if (removedCount === 0) {
+    if (targetSessions.length === 0) {
       setToast?.("本月剩餘日期沒有可清除的 regular 課次");
       return;
     }
 
+    if (isSessionsBackendAvailable) {
+      try {
+        await Promise.all(targetSessions.map((session) => deleteSession(session.id)));
+      } catch (error) {
+        console.warn("Clear regular sessions failed", error);
+        setToast?.("清除固定課表失敗，請確認後端是否正常");
+        return;
+      }
+    }
+
+    const deletedIds = new Set(targetSessions.map((session) => session.id));
     setSessions((current) =>
-      current.filter(
-        (session) =>
-          !(
-            session.studentId === student.id &&
-            session.kind === "regular" &&
-            isWithinMonthRemaining(session.dateISO, selectedDate)
-          )
-      )
+      current
+        .filter((session) => !deletedIds.has(session.id))
+        .map((session) =>
+          session.makeupOfSessionId !== undefined && deletedIds.has(session.makeupOfSessionId)
+            ? { ...session, makeupOfSessionId: undefined }
+            : session
+        )
     );
 
-    setToast?.(`已清除 ${removedCount} 堂 regular 課次`);
+    setToast?.(`已清除 ${targetSessions.length} 堂 regular 課次`);
   }
 
   function regenerateRegularSessionsForStudent(student: StudentProfile) {
