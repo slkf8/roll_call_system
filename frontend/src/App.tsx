@@ -5,6 +5,7 @@ import StudentsPage from "./pages/StudentsPage";
 import DataPage from "./pages/DataPage";
 import { fetchStudents } from "./api/studentsApi";
 import { fetchScheduleRules } from "./api/scheduleRulesApi";
+import { fetchSessions } from "./api/sessionsApi";
 import type {
   TabKey,
   TabDef,
@@ -396,6 +397,7 @@ export default function App() {
   });
   const [isStudentsBackendAvailable, setIsStudentsBackendAvailable] = useState(false);
   const [isScheduleRulesBackendAvailable, setIsScheduleRulesBackendAvailable] = useState(false);
+  const [, setIsSessionsBackendAvailable] = useState(false);
 
   const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
     if (restoredData) {
@@ -418,28 +420,41 @@ export default function App() {
         if (backendStudents.length === 0) {
           setStudentScheduleRules([]);
           setIsScheduleRulesBackendAvailable(true);
-          return;
+        } else {
+          try {
+            const backendRulesByStudent = await Promise.all(
+              backendStudents.map((student) => fetchScheduleRules(student.id))
+            );
+            if (!cancelled) {
+              setStudentScheduleRules(backendRulesByStudent.flat());
+              setIsScheduleRulesBackendAvailable(true);
+            }
+          } catch (error) {
+            if (!cancelled) {
+              setIsScheduleRulesBackendAvailable(false);
+            }
+            console.warn("Backend schedule rules unavailable, using local data", error);
+          }
         }
 
         try {
-          const backendRulesByStudent = await Promise.all(
-            backendStudents.map((student) => fetchScheduleRules(student.id))
-          );
+          const backendSessions = await fetchSessions();
           if (!cancelled) {
-            setStudentScheduleRules(backendRulesByStudent.flat());
-            setIsScheduleRulesBackendAvailable(true);
+            setSessions(backendSessions);
+            setIsSessionsBackendAvailable(true);
           }
         } catch (error) {
           if (!cancelled) {
-            setIsScheduleRulesBackendAvailable(false);
+            setIsSessionsBackendAvailable(false);
           }
-          console.warn("Backend schedule rules unavailable, using local data", error);
+          console.warn("Backend sessions unavailable, using local data", error);
         }
       })
       .catch((error) => {
         if (!cancelled) {
           setIsStudentsBackendAvailable(false);
           setIsScheduleRulesBackendAvailable(false);
+          setIsSessionsBackendAvailable(false);
         }
         console.warn("Backend students unavailable, using local data", error);
       });

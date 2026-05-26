@@ -41,6 +41,45 @@ function getValueNearLabel(label: string) {
   return within(container);
 }
 
+function backendStudentResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 501,
+    name: "後端學生",
+    birthday: "2012-01-02",
+    school: "後端學校",
+    status: "active",
+    deactivateMode: null,
+    deactivateOn: null,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+    ...overrides,
+  };
+}
+
+function backendSessionResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 7001,
+    studentId: 501,
+    student: {
+      id: 501,
+      name: "後端課次學生",
+    },
+    dateISO: "2026-06-01",
+    start: "16:00",
+    durationMin: 60,
+    status: "pending",
+    reason: null,
+    note: null,
+    kind: "regular",
+    makeupOfDateISO: null,
+    makeupOfSessionId: null,
+    scheduleRuleId: null,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   installMemoryLocalStorage();
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -60,19 +99,7 @@ describe("App empty data safety", () => {
   it("uses backend students when GET /api/students succeeds", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
-      json: async () => [
-        {
-          id: 501,
-          name: "後端學生",
-          birthday: "2012-01-02",
-          school: "後端學校",
-          status: "active",
-          deactivateMode: null,
-          deactivateOn: null,
-          createdAt: "2026-05-25T10:00:00",
-          updatedAt: "2026-05-25T10:00:00",
-        },
-      ],
+      json: async () => [backendStudentResponse()],
     } as Response);
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -104,6 +131,166 @@ describe("App empty data safety", () => {
     expect(await screen.findByText("後端學生")).toBeInTheDocument();
     expect(await screen.findByText("共 1 條規則")).toBeInTheDocument();
     expect(screen.queryByText("尚未建立任何學生")).not.toBeInTheDocument();
+  });
+
+  it("loads backend sessions after backend students succeed", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendSessionResponse()],
+      } as Response);
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [
+        {
+          id: 1,
+          studentId: 1,
+          student: { id: 1, name: "本地課次學生" },
+          dateISO: "2026-06-01",
+          start: "10:00",
+          durationMin: 60,
+          status: "pending",
+          kind: "regular",
+        },
+      ],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("後端課次學生")).toBeInTheDocument();
+    expect(screen.queryByText("本地課次學生")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/sessions");
+    });
+  });
+
+  it("treats an empty backend sessions response as a valid empty source", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response);
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [
+        {
+          id: 1,
+          studentId: 1,
+          student: { id: 1, name: "本地課次學生" },
+          dateISO: "2026-06-01",
+          start: "10:00",
+          durationMin: 60,
+          status: "pending",
+          kind: "regular",
+        },
+      ],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("今日沒有課次")).toBeInTheDocument();
+    expect(screen.queryByText("本地課次學生")).not.toBeInTheDocument();
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.sessions).toEqual([]);
+    });
+  });
+
+  it("keeps fallback sessions when backend sessions loading fails", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockRejectedValueOnce(new Error("sessions unavailable"));
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [
+        {
+          id: 1,
+          studentId: 1,
+          student: { id: 1, name: "本地課次學生" },
+          dateISO: "2026-06-01",
+          start: "10:00",
+          durationMin: 60,
+          status: "pending",
+          kind: "regular",
+        },
+      ],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出席紀錄系統")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/sessions");
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.sessions).toEqual([
+        expect.objectContaining({
+          id: 1,
+          studentId: 1,
+          dateISO: "2026-06-01",
+          start: "10:00",
+        }),
+      ]);
+    });
+    expect(screen.queryByText("後端課次學生")).not.toBeInTheDocument();
   });
 
   it("treats an empty backend students response as a valid empty source", async () => {
@@ -210,6 +397,53 @@ describe("App empty data safety", () => {
     expect(await screen.findByText("本地學生")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/students"));
     expect(screen.queryByText("尚未建立任何學生")).not.toBeInTheDocument();
+  });
+
+  it("keeps local fallback sessions when backend students loading fails", async () => {
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [
+        {
+          id: 1,
+          name: "本地學生",
+          birthday: "2012-03-08",
+          school: "本地學校",
+          status: "active",
+        },
+      ],
+      sessions: [
+        {
+          id: 1,
+          studentId: 1,
+          student: { id: 1, name: "本地課次學生" },
+          dateISO: "2026-06-01",
+          start: "10:00",
+          durationMin: 60,
+          status: "pending",
+          kind: "regular",
+        },
+      ],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出席紀錄系統")).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/students"));
+    expect(fetch).not.toHaveBeenCalledWith("http://127.0.0.1:8000/api/sessions");
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.sessions).toEqual([
+        expect.objectContaining({
+          id: 1,
+          studentId: 1,
+          dateISO: "2026-06-01",
+          start: "10:00",
+        }),
+      ]);
+    });
   });
 
   it("respects persisted empty arrays without injecting demo sessions", async () => {
