@@ -558,6 +558,151 @@ describe("StudentsPage", () => {
     );
   });
 
+  it("removes future linked sessions through backend DELETE when immediate deactivation succeeds", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () =>
+            backendStudentResponse({
+              id: 1,
+              name: "陳小明",
+              birthday: "2012-03-08",
+              school: "培正中學",
+              status: "inactive",
+              deactivateMode: "immediate",
+            }),
+        } as Response;
+      }
+      if (init?.method === "DELETE") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const futureSession: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const pastMakeupLinked: Session = {
+      id: 1001,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "1900-01-01",
+      start: "11:00",
+      durationMin: 60,
+      status: "present",
+      kind: "makeup",
+      makeupOfSessionId: 999,
+    };
+    const otherStudentFuture: Session = {
+      id: 1002,
+      studentId: 2,
+      student: { id: 2, name: "李小欣" },
+      dateISO: "2099-01-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      isSessionsBackendAvailable: true,
+      initialSessions: [...makeSessions(), futureSession, pastMakeupLinked, otherStudentFuture],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "立即停用" }));
+    await user.click(screen.getByRole("button", { name: "確認停用" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts.some((t) => t.startsWith("已立即停用"))).toBe(true)
+    );
+
+    expect(snapshot.sessions.some((s) => s.id === 999)).toBe(false);
+    const pastMakeupAfter = snapshot.sessions.find((s) => s.id === 1001);
+    expect(pastMakeupAfter).toBeDefined();
+    expect(pastMakeupAfter?.makeupOfSessionId).toBeUndefined();
+    expect(snapshot.sessions.some((s) => s.id === 1002)).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/999",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    const deletedUrls = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "DELETE")
+      .map(([url]) => url as string);
+    expect(deletedUrls).toContain("http://127.0.0.1:8000/api/sessions/999");
+    expect(deletedUrls).not.toContain("http://127.0.0.1:8000/api/sessions/1001");
+    expect(deletedUrls).not.toContain("http://127.0.0.1:8000/api/sessions/1002");
+  });
+
+  it("does not remove local sessions when immediate deactivation backend DELETE fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () =>
+            backendStudentResponse({
+              id: 1,
+              name: "陳小明",
+              birthday: "2012-03-08",
+              school: "培正中學",
+              status: "inactive",
+              deactivateMode: "immediate",
+            }),
+        } as Response;
+      }
+      if (init?.method === "DELETE") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({}),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const futureSession: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      isSessionsBackendAvailable: true,
+      initialSessions: [...makeSessions(), futureSession],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "立即停用" }));
+    await user.click(screen.getByRole("button", { name: "確認停用" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((s) => s.id === 1)?.status).toBe("inactive")
+    );
+    expect(snapshot.toasts).toContain("停用學生時移除課次失敗，請確認後端是否正常");
+    expect(snapshot.sessions.some((s) => s.id === 999)).toBe(true);
+    expect(snapshot.toasts.every((t) => !t.startsWith("已立即停用"))).toBe(true);
+  });
+
   it("does not remove linked sessions when backend deactivation fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal(
@@ -659,6 +804,154 @@ describe("StudentsPage", () => {
         }),
       })
     );
+  });
+
+  it("removes sessions from deactivateOn onwards through backend DELETE when scheduled deactivation succeeds", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () =>
+            backendStudentResponse({
+              id: 1,
+              name: "陳小明",
+              birthday: "2012-03-08",
+              school: "培正中學",
+              status: "scheduled_deactivation",
+              deactivateMode: "scheduled",
+              deactivateOn: "2099-02-01",
+            }),
+        } as Response;
+      }
+      if (init?.method === "DELETE") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, detachedMakeupCount: 0 }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const beforeScheduledDate: Session = {
+      id: 998,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-01-31",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const afterScheduledDate: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-02-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const otherStudentAfter: Session = {
+      id: 1002,
+      studentId: 2,
+      student: { id: 2, name: "李小欣" },
+      dateISO: "2099-02-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      isSessionsBackendAvailable: true,
+      initialSessions: [...makeSessions(), beforeScheduledDate, afterScheduledDate, otherStudentAfter],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "指定日期停用" }));
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2099-02-01" } });
+    await user.click(screen.getByRole("button", { name: "確認設定" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts.some((t) => t.startsWith("已設定停用"))).toBe(true)
+    );
+
+    expect(snapshot.sessions.some((s) => s.id === 999)).toBe(false);
+    expect(snapshot.sessions.some((s) => s.id === 998)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === 1002)).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/999",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    const deletedUrls = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "DELETE")
+      .map(([url]) => url as string);
+    expect(deletedUrls).toContain("http://127.0.0.1:8000/api/sessions/999");
+    expect(deletedUrls).not.toContain("http://127.0.0.1:8000/api/sessions/998");
+    expect(deletedUrls).not.toContain("http://127.0.0.1:8000/api/sessions/1002");
+  });
+
+  it("does not remove local sessions when scheduled deactivation backend DELETE fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return {
+          ok: true,
+          json: async () =>
+            backendStudentResponse({
+              id: 1,
+              name: "陳小明",
+              birthday: "2012-03-08",
+              school: "培正中學",
+              status: "scheduled_deactivation",
+              deactivateMode: "scheduled",
+              deactivateOn: "2099-02-01",
+            }),
+        } as Response;
+      }
+      if (init?.method === "DELETE") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({}),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const afterScheduledDate: Session = {
+      id: 999,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2099-02-01",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "regular",
+    };
+    const { user, snapshot } = renderStudentsPage({
+      isStudentsBackendAvailable: true,
+      isSessionsBackendAvailable: true,
+      initialSessions: [...makeSessions(), afterScheduledDate],
+    });
+
+    await openStudentEditor(user, "陳小明");
+    await user.click(screen.getByRole("button", { name: "指定日期停用" }));
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2099-02-01" } });
+    await user.click(screen.getByRole("button", { name: "確認設定" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((s) => s.id === 1)?.status).toBe("scheduled_deactivation")
+    );
+    expect(snapshot.toasts).toContain("停用學生時移除課次失敗，請確認後端是否正常");
+    expect(snapshot.sessions.some((s) => s.id === 999)).toBe(true);
+    expect(snapshot.toasts.every((t) => !t.startsWith("已設定停用"))).toBe(true);
   });
 
   it("does not remove scheduled linked sessions when backend scheduled deactivation fails", async () => {

@@ -322,34 +322,75 @@ export default function StudentsPage({
     );
   }
 
-  function removeImmediateLinkedSessions(studentId: number) {
-    if (!sessions || !setSessions) return 0;
+  async function removeImmediateLinkedSessions(
+    studentId: number
+  ): Promise<{ removedCount: number; ok: boolean }> {
+    if (!sessions || !setSessions) return { removedCount: 0, ok: true };
 
-    const impacted = sessions.filter((session) =>
+    const targetSessions = sessions.filter((session) =>
       isFutureLinkedSession(session, studentId)
-    ).length;
-
-    setSessions((current) =>
-      current.filter((session) => !isFutureLinkedSession(session, studentId))
     );
 
-    return impacted;
+    if (targetSessions.length === 0) return { removedCount: 0, ok: true };
+
+    if (isSessionsBackendAvailable) {
+      try {
+        await Promise.all(targetSessions.map((session) => deleteSession(session.id)));
+      } catch (error) {
+        console.warn("Remove linked sessions on immediate deactivation failed", error);
+        setToast?.("停用學生時移除課次失敗，請確認後端是否正常");
+        return { removedCount: 0, ok: false };
+      }
+    }
+
+    const deletedIds = new Set(targetSessions.map((session) => session.id));
+    setSessions((current) =>
+      current
+        .filter((session) => !deletedIds.has(session.id))
+        .map((session) =>
+          session.makeupOfSessionId !== undefined && deletedIds.has(session.makeupOfSessionId)
+            ? { ...session, makeupOfSessionId: undefined }
+            : session
+        )
+    );
+
+    return { removedCount: targetSessions.length, ok: true };
   }
 
-  function removeScheduledLinkedSessions(studentId: number, dateISO: string) {
-    if (!sessions || !setSessions || !dateISO) return 0;
+  async function removeScheduledLinkedSessions(
+    studentId: number,
+    dateISO: string
+  ): Promise<{ removedCount: number; ok: boolean }> {
+    if (!sessions || !setSessions || !dateISO) return { removedCount: 0, ok: true };
 
-    const impacted = sessions.filter(
+    const targetSessions = sessions.filter(
       (session) => session.studentId === studentId && session.dateISO >= dateISO
-    ).length;
-
-    setSessions((current) =>
-      current.filter(
-        (session) => !(session.studentId === studentId && session.dateISO >= dateISO)
-      )
     );
 
-    return impacted;
+    if (targetSessions.length === 0) return { removedCount: 0, ok: true };
+
+    if (isSessionsBackendAvailable) {
+      try {
+        await Promise.all(targetSessions.map((session) => deleteSession(session.id)));
+      } catch (error) {
+        console.warn("Remove linked sessions on scheduled deactivation failed", error);
+        setToast?.("停用學生時移除課次失敗，請確認後端是否正常");
+        return { removedCount: 0, ok: false };
+      }
+    }
+
+    const deletedIds = new Set(targetSessions.map((session) => session.id));
+    setSessions((current) =>
+      current
+        .filter((session) => !deletedIds.has(session.id))
+        .map((session) =>
+          session.makeupOfSessionId !== undefined && deletedIds.has(session.makeupOfSessionId)
+            ? { ...session, makeupOfSessionId: undefined }
+            : session
+        )
+    );
+
+    return { removedCount: targetSessions.length, ok: true };
   }
 
   async function saveStudentUpdate(
@@ -1030,9 +1071,11 @@ export default function StudentsPage({
 
       if (!updatedStudent) return;
 
-      const removedCount = removeImmediateLinkedSessions(target.id);
+      const result = await removeImmediateLinkedSessions(target.id);
 
-      setToast?.(`已立即停用，移除 ${removedCount} 堂已關聯未來課次`);
+      if (result.ok) {
+        setToast?.(`已立即停用，移除 ${result.removedCount} 堂已關聯未來課次`);
+      }
     }
 
     if (pendingAction.kind === "deactivate_scheduled") {
@@ -1059,9 +1102,11 @@ export default function StudentsPage({
 
       if (!updatedStudent) return;
 
-      const removedCount = removeScheduledLinkedSessions(target.id, trimmed);
+      const result = await removeScheduledLinkedSessions(target.id, trimmed);
 
-      setToast?.(`已設定停用，移除 ${removedCount} 堂已關聯課次`);
+      if (result.ok) {
+        setToast?.(`已設定停用，移除 ${result.removedCount} 堂已關聯課次`);
+      }
     }
 
     if (pendingAction.kind === "restore") {
