@@ -3,12 +3,13 @@ import * as React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { updateSession } from "../../api/sessionsApi";
+import { createSession, updateSession } from "../../api/sessionsApi";
 import type { Session, StudentProfile } from "../../shared/appShared";
 import TodayPage from "../TodayPage";
 
 
 vi.mock("../../api/sessionsApi", () => ({
+  createSession: vi.fn(),
   updateSession: vi.fn(),
 }));
 
@@ -150,6 +151,78 @@ describe("TodayPage backend session status updates", () => {
       expect(screen.getByText("缺席")).toBeInTheDocument();
       expect(screen.getByText("生病")).toBeInTheDocument();
       expect(screen.getByText(/已通知家長/)).toBeInTheDocument();
+    });
+  });
+
+  it("creates a single session through backend POST when sessions backend is available", async () => {
+    vi.mocked(createSession).mockResolvedValueOnce({
+      id: 99,
+      studentId: 1,
+      student: { id: 1, name: "後端課次學生" },
+      dateISO: "2026-06-01",
+      start: "09:30",
+      durationMin: 60,
+      status: "pending",
+      reason: undefined,
+      note: undefined,
+      kind: "extra",
+      makeupOfDateISO: undefined,
+      makeupOfSessionId: undefined,
+      scheduleRuleId: undefined,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("新增課次"));
+    await user.click(screen.getByRole("button", { name: "新增" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        studentId: 1,
+        dateISO: "2026-06-01",
+        start: expect.any(String),
+        durationMin: 60,
+        status: "pending",
+        reason: null,
+        note: null,
+        kind: "extra",
+        makeupOfDateISO: null,
+        makeupOfSessionId: null,
+        scheduleRuleId: null,
+      });
+      expect(screen.getByText("09:30")).toBeInTheDocument();
+    });
+  });
+
+  it("does not add a local session when backend create fails", async () => {
+    const setToast = vi.fn();
+    vi.mocked(createSession).mockRejectedValueOnce(new Error("create failed"));
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("新增課次"));
+    await user.click(screen.getByRole("button", { name: "新增" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(setToast).toHaveBeenCalledWith("新增課次失敗，請確認後端是否正常");
+    });
+    expect(screen.getAllByLabelText("記錄已到")).toHaveLength(1);
+    expect(screen.getByText("新增臨時課次")).toBeInTheDocument();
+  });
+
+  it("keeps local single session creation when sessions backend is unavailable", async () => {
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    await user.click(screen.getByLabelText("新增課次"));
+    await user.click(screen.getByRole("button", { name: "新增" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
     });
   });
 });

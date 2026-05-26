@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { updateSession } from "../api/sessionsApi";
+import { createSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 import type {
   Session,
@@ -467,7 +467,7 @@ export default function TodayPage({
     setCreateOpen(true);
   }
 
-  function handleCreateSession() {
+  async function handleCreateSession() {
     const student = schedulableStudents.find((s) => s.id === createStudentId);
 
     if (!student || student.status === "inactive") {
@@ -490,6 +490,37 @@ export default function TodayPage({
 
     const candidates = getConflictCandidates(sessions, createDate, globalEvents);
     const conflicts = candidates.filter(other => checkOverlap(newSession, other));
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const createdSession = await createSession({
+          studentId: student.id,
+          dateISO: createDate,
+          start: createStart,
+          durationMin: clamped,
+          status: "pending",
+          reason: null,
+          note: null,
+          kind: "extra",
+          makeupOfDateISO: null,
+          makeupOfSessionId: null,
+          scheduleRuleId: null,
+        });
+
+        setSessions(prev => [...prev, createdSession]);
+
+        if (conflicts.length > 0) {
+          setToast(formatConflictSummary([createdSession, ...conflicts]));
+        } else {
+          setToast("已新增課次");
+        }
+        setCreateOpen(false);
+      } catch (error) {
+        console.warn("Backend session create failed", error);
+        setToast("新增課次失敗，請確認後端是否正常");
+      }
+      return;
+    }
 
     setSessions(prev => [...prev, newSession]);
     
