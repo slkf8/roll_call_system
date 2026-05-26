@@ -56,12 +56,16 @@ Implemented:
 - `GET /api/students`
 - `POST /api/students`
 - `PATCH /api/students/{id}`
+- `GET /api/students/{student_id}/schedule-rules`
+- `POST /api/students/{student_id}/schedule-rules`
+- `PATCH /api/schedule-rules/{rule_id}`
+- `DELETE /api/schedule-rules/{rule_id}`
 
 Not implemented yet:
 
 - sessions
-- student schedule rules
 - global events
 - statistics
 - Excel export
 - frontend API integration beyond students
+- frontend schedule rules integration

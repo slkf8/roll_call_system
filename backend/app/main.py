@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import students
+from app.routers import schedule_rules, students
 
 
 @asynccontextmanager
@@ -33,3 +33,4 @@ def health():
 
 
 app.include_router(students.router)
+app.include_router(schedule_rules.router)
