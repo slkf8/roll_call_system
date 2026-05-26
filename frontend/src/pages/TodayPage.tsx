@@ -436,13 +436,43 @@ export default function TodayPage({
     setEditOpen(true);
   }
 
-  function saveEdit() {
+  async function saveEdit() {
     if (!selected) return;
     const clamped = Math.min(120, Math.max(1, editDuration || 1));
     const nextSession = { ...selected, start: editStart, durationMin: clamped };
     
     const candidates = getConflictCandidates(sessions, selected.dateISO, globalEvents);
     const conflicts = candidates.filter(s => s.id !== selected.id && checkOverlap(nextSession, s));
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const updatedSession = await updateSession(selected.id, {
+          dateISO: selected.dateISO,
+          start: editStart,
+          durationMin: clamped,
+        });
+        const nextSessions = sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
+
+        setSessions(() => nextSessions);
+
+        const updatedConflicts = getConflictCandidates(
+          nextSessions,
+          updatedSession.dateISO,
+          globalEvents
+        ).filter((s) => s.id !== updatedSession.id && checkOverlap(updatedSession, s));
+
+        if (updatedConflicts.length > 0) {
+          setToast(formatConflictSummary([updatedSession, ...updatedConflicts]));
+        } else {
+          setToast("已更新課次");
+        }
+        setEditOpen(false);
+      } catch (error) {
+        console.warn("Backend session edit failed", error);
+        setToast("編輯課次失敗，請確認後端是否正常");
+      }
+      return;
+    }
 
     patchSession(selected.id, { start: editStart, durationMin: clamped });
     

@@ -395,7 +395,7 @@ const calculateDayConflicts = (
     setMkPurpose(purpose);
   }
 
-  const handleEditSubmit = () => {
+  const handleEditSubmit = async () => {
     if (!sheetEditFor) return;
 
     const updatedSession: Session = {
@@ -404,6 +404,29 @@ const calculateDayConflicts = (
       start: editStart,
       durationMin: editDuration,
     };
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const backendUpdatedSession = await updateSession(sheetEditFor.id as number, {
+          dateISO: editDate,
+          start: editStart,
+          durationMin: editDuration,
+        });
+        setSessions((prev) => {
+          const safePrev = prev || [];
+          const nextSessions = safePrev.map((s) =>
+            s.id === backendUpdatedSession.id ? backendUpdatedSession : s
+          );
+          checkConflictsWithOthers(backendUpdatedSession, nextSessions);
+          return nextSessions;
+        });
+        setSheetEditFor(null);
+      } catch (error) {
+        console.warn("Backend session edit failed", error);
+        setToast("編輯課次失敗，請確認後端是否正常");
+      }
+      return;
+    }
 
     setSessions((prev) => {
       const safePrev = prev || [];

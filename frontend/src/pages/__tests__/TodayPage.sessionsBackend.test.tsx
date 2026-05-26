@@ -225,4 +225,71 @@ describe("TodayPage backend session status updates", () => {
       expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
     });
   });
+
+  it("updates session start and duration through backend PATCH when sessions backend is available", async () => {
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      start: "17:30",
+      durationMin: 75,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("編輯課次（時間 / 時長）"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        dateISO: "2026-06-01",
+        start: "16:00",
+        durationMin: 60,
+      });
+      expect(document.body).toHaveTextContent("17:30");
+      expect(document.body).toHaveTextContent("1小時15分鐘課程");
+      expect(document.body).toHaveTextContent("18:45");
+    });
+  });
+
+  it("does not update local session when backend edit PATCH fails", async () => {
+    const setToast = vi.fn();
+    vi.mocked(updateSession).mockRejectedValueOnce(new Error("edit failed"));
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("編輯課次（時間 / 時長）"));
+    await user.click(screen.getByLabelText("增加"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        dateISO: "2026-06-01",
+        start: "16:00",
+        durationMin: 61,
+      });
+      expect(setToast).toHaveBeenCalledWith("編輯課次失敗，請確認後端是否正常");
+    });
+    expect(screen.getByText("編輯課次")).toBeInTheDocument();
+    expect(document.body).toHaveTextContent("1小時課程");
+    expect(document.body).toHaveTextContent("17:00");
+  });
+
+  it("keeps local edit flow when sessions backend is unavailable", async () => {
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    await user.click(screen.getByLabelText("更多"));
+    await user.click(screen.getByText("編輯課次（時間 / 時長）"));
+    await user.click(screen.getByLabelText("增加"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    expect(updateSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(document.body).toHaveTextContent("1小時1分鐘課程");
+      expect(document.body).toHaveTextContent("17:01");
+    });
+  });
 });
