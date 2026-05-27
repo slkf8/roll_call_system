@@ -1,5 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import {
+  createGlobalEvent,
+  deleteGlobalEvent as deleteBackendGlobalEvent,
+  updateGlobalEvent,
+} from "../api/globalEventsApi";
 import { createSession, deleteSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 import type {
@@ -52,6 +57,7 @@ export interface TodayPageProps {
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
   isSessionsBackendAvailable: boolean;
+  isGlobalEventsBackendAvailable: boolean;
   globalEvents: GlobalEvent[];
   setGlobalEvents: Dispatch<SetStateAction<GlobalEvent[]>>;
   setToast: Dispatch<SetStateAction<string>>;
@@ -66,6 +72,7 @@ export default function TodayPage({
   sessions,
   setSessions,
   isSessionsBackendAvailable,
+  isGlobalEventsBackendAvailable,
   globalEvents,
   setGlobalEvents,
   setToast
@@ -194,7 +201,7 @@ export default function TodayPage({
     setGlobalSheetOpen(true);
   }
 
-  function saveGlobalEvent() {
+  async function saveGlobalEvent() {
     if (!editingGlobal.label.trim()) {
       setToast("請輸入事件名稱");
       return;
@@ -226,10 +233,42 @@ export default function TodayPage({
         : undefined,
   };
 
-    setGlobalEvents(prev => {
-      const filtered = prev.filter(e => e.dateISO !== normalizedEvent.dateISO);
-      return [...filtered, normalizedEvent];
-    });
+    if (isGlobalEventsBackendAvailable) {
+      const payload = {
+        dateISO: normalizedEvent.dateISO,
+        mode: normalizedEvent.mode,
+        label: normalizedEvent.label,
+        leaveReason: normalizedEvent.leaveReason ?? null,
+        start: normalizedEvent.mode === "timeRange" ? normalizedEvent.start ?? null : null,
+        end: normalizedEvent.mode === "timeRange" ? normalizedEvent.end ?? null : null,
+        note: normalizedEvent.note ?? null,
+      };
+
+      try {
+        if (currentGlobalEvent) {
+          const updatedEvent = await updateGlobalEvent(currentGlobalEvent.id, payload);
+          setGlobalEvents(prev =>
+            prev.map(e => e.id === updatedEvent.id ? updatedEvent : e)
+          );
+        } else {
+          const createdEvent = await createGlobalEvent(payload);
+          setGlobalEvents(prev => [...prev, createdEvent]);
+        }
+      } catch (error) {
+        console.warn("Backend global event save failed", error);
+        setToast(
+          currentGlobalEvent
+            ? "更新停課 / 假期失敗，請確認後端是否正常"
+            : "建立停課 / 假期失敗，請確認後端是否正常"
+        );
+        return;
+      }
+    } else {
+      setGlobalEvents(prev => {
+        const filtered = prev.filter(e => e.dateISO !== normalizedEvent.dateISO);
+        return [...filtered, normalizedEvent];
+      });
+    }
 
     setGlobalSheetOpen(false);
     setToast(
@@ -239,8 +278,19 @@ export default function TodayPage({
     );
   }
 
-  function deleteGlobalEvent() {
-    setGlobalEvents(prev => prev.filter(e => e.dateISO !== selectedDate));
+  async function deleteGlobalEvent() {
+    if (isGlobalEventsBackendAvailable && currentGlobalEvent) {
+      try {
+        await deleteBackendGlobalEvent(currentGlobalEvent.id);
+        setGlobalEvents(prev => prev.filter(e => e.id !== currentGlobalEvent.id));
+      } catch (error) {
+        console.warn("Backend global event delete failed", error);
+        setToast("刪除停課 / 假期失敗，請確認後端是否正常");
+        return;
+      }
+    } else {
+      setGlobalEvents(prev => prev.filter(e => e.dateISO !== selectedDate));
+    }
     setGlobalSheetOpen(false);
     setToast("已取消全局事件");
   }

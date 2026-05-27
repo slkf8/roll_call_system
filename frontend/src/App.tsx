@@ -399,7 +399,7 @@ export default function App() {
   const [isStudentsBackendAvailable, setIsStudentsBackendAvailable] = useState(false);
   const [isScheduleRulesBackendAvailable, setIsScheduleRulesBackendAvailable] = useState(false);
   const [isSessionsBackendAvailable, setIsSessionsBackendAvailable] = useState(false);
-  const [, setIsGlobalEventsBackendAvailable] = useState(false);
+  const [isGlobalEventsBackendAvailable, setIsGlobalEventsBackendAvailable] = useState(false);
 
   const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
     if (restoredData) {
@@ -552,6 +552,7 @@ export default function App() {
               sessions={sessions}
               setSessions={setSessions}
               isSessionsBackendAvailable={isSessionsBackendAvailable}
+              isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
               globalEvents={globalEvents}
               setGlobalEvents={setGlobalEvents}
               setToast={setToast}

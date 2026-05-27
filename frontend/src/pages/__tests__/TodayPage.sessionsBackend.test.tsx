@@ -1,12 +1,23 @@
 import "@testing-library/jest-dom/vitest";
 import * as React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createGlobalEvent,
+  deleteGlobalEvent,
+  updateGlobalEvent,
+} from "../../api/globalEventsApi";
 import { createSession, deleteSession, updateSession } from "../../api/sessionsApi";
-import type { Session, StudentProfile } from "../../shared/appShared";
+import type { GlobalEvent, Session, StudentProfile } from "../../shared/appShared";
 import TodayPage from "../TodayPage";
 
+
+vi.mock("../../api/globalEventsApi", () => ({
+  createGlobalEvent: vi.fn(),
+  deleteGlobalEvent: vi.fn(),
+  updateGlobalEvent: vi.fn(),
+}));
 
 vi.mock("../../api/sessionsApi", () => ({
   createSession: vi.fn(),
@@ -50,20 +61,31 @@ const linkedMakeupSession: Session = {
 
 function TodayHarness({
   isSessionsBackendAvailable,
+  isGlobalEventsBackendAvailable = false,
   setToast = vi.fn(),
   initialSessions = [baseSession],
+  initialGlobalEvents = [],
   onSessionsChange,
+  onGlobalEventsChange,
 }: {
   isSessionsBackendAvailable: boolean;
+  isGlobalEventsBackendAvailable?: boolean;
   setToast?: React.Dispatch<React.SetStateAction<string>>;
   initialSessions?: Session[];
+  initialGlobalEvents?: GlobalEvent[];
   onSessionsChange?: (sessions: Session[]) => void;
+  onGlobalEventsChange?: (events: GlobalEvent[]) => void;
 }) {
   const [sessions, setSessions] = React.useState<Session[]>(initialSessions);
+  const [globalEvents, setGlobalEvents] = React.useState<GlobalEvent[]>(initialGlobalEvents);
 
   React.useEffect(() => {
     onSessionsChange?.(sessions);
   }, [onSessionsChange, sessions]);
+
+  React.useEffect(() => {
+    onGlobalEventsChange?.(globalEvents);
+  }, [globalEvents, onGlobalEventsChange]);
 
   return (
     <TodayPage
@@ -75,8 +97,9 @@ function TodayHarness({
       sessions={sessions}
       setSessions={setSessions}
       isSessionsBackendAvailable={isSessionsBackendAvailable}
-      globalEvents={[]}
-      setGlobalEvents={vi.fn()}
+      isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
+      globalEvents={globalEvents}
+      setGlobalEvents={setGlobalEvents}
       setToast={setToast}
     />
   );
@@ -545,6 +568,333 @@ describe("TodayPage backend session status updates", () => {
     expect(createSession).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(screen.getAllByLabelText("記錄已到")).toHaveLength(2);
+    });
+  });
+
+  it("creates an all-day global event through backend when global events backend is available", async () => {
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(createGlobalEvent).mockResolvedValueOnce({
+      id: 701,
+      dateISO: "2026-06-01",
+      mode: "allDay",
+      label: "停課",
+      leaveReason: "病假",
+    });
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText("設定停課/假期"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createGlobalEvent).toHaveBeenCalledWith({
+        dateISO: "2026-06-01",
+        mode: "allDay",
+        label: "停課",
+        leaveReason: "病假",
+        start: null,
+        end: null,
+        note: null,
+      });
+      expect(latestGlobalEvents).toEqual([
+        expect.objectContaining({ id: 701, mode: "allDay", label: "停課" }),
+      ]);
+      expect(screen.getByText(/已設定：停課/)).toBeInTheDocument();
+    });
+  });
+
+  it("does not create a local global event when backend create fails", async () => {
+    const setToast = vi.fn();
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(createGlobalEvent).mockRejectedValueOnce(new Error("create failed"));
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        setToast={setToast}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText("設定停課/假期"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createGlobalEvent).toHaveBeenCalledOnce();
+      expect(setToast).toHaveBeenCalledWith("建立停課 / 假期失敗，請確認後端是否正常");
+    });
+    expect(latestGlobalEvents).toEqual([]);
+    expect(screen.getByText("設定全局事件")).toBeInTheDocument();
+  });
+
+  it("keeps local global event creation when backend is unavailable", async () => {
+    let latestGlobalEvents: GlobalEvent[] = [];
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={false}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText("設定停課/假期"));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    expect(createGlobalEvent).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(latestGlobalEvents).toEqual([
+        expect.objectContaining({
+          dateISO: "2026-06-01",
+          mode: "allDay",
+          label: "停課",
+          leaveReason: "病假",
+        }),
+      ]);
+    });
+  });
+
+  it("creates a time-range global event through backend", async () => {
+    vi.mocked(createGlobalEvent).mockResolvedValueOnce({
+      id: 702,
+      dateISO: "2026-06-01",
+      mode: "timeRange",
+      label: "停課",
+      leaveReason: "病假",
+      start: "14:00",
+      end: "18:00",
+    });
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+      />
+    );
+
+    await user.click(screen.getByText("設定停課/假期"));
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "timeRange" } });
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(createGlobalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "timeRange",
+          start: "14:00",
+          end: "18:00",
+        })
+      );
+    });
+  });
+
+  it("updates an existing global event through backend", async () => {
+    const setToast = vi.fn();
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(updateGlobalEvent).mockResolvedValueOnce({
+      id: 703,
+      dateISO: "2026-06-01",
+      mode: "allDay",
+      label: "假期",
+    });
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        setToast={setToast}
+        initialGlobalEvents={[
+          {
+            id: 703,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText(/已設定：停課/));
+    await user.click(screen.getByRole("button", { name: "假期" }));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(updateGlobalEvent).toHaveBeenCalledWith(703, {
+        dateISO: "2026-06-01",
+        mode: "allDay",
+        label: "假期",
+        leaveReason: null,
+        start: null,
+        end: null,
+        note: null,
+      });
+      expect(latestGlobalEvents).toEqual([
+        expect.objectContaining({ id: 703, label: "假期", mode: "allDay" }),
+      ]);
+      expect(latestGlobalEvents[0]?.leaveReason).toBeUndefined();
+    });
+  });
+
+  it("does not update a local global event when backend update fails", async () => {
+    const setToast = vi.fn();
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(updateGlobalEvent).mockRejectedValueOnce(new Error("update failed"));
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        setToast={setToast}
+        initialGlobalEvents={[
+          {
+            id: 704,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText(/已設定：停課/));
+    await user.click(screen.getByRole("button", { name: "假期" }));
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(updateGlobalEvent).toHaveBeenCalledOnce();
+      expect(setToast).toHaveBeenCalledWith("更新停課 / 假期失敗，請確認後端是否正常");
+    });
+    expect(latestGlobalEvents).toEqual([
+      expect.objectContaining({ id: 704, label: "停課", leaveReason: "病假" }),
+    ]);
+  });
+
+  it("deletes an existing global event through backend", async () => {
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(deleteGlobalEvent).mockResolvedValueOnce({ ok: true });
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        initialGlobalEvents={[
+          {
+            id: 705,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText(/已設定：停課/));
+    await user.click(screen.getByRole("button", { name: "取消此事件" }));
+
+    await waitFor(() => {
+      expect(deleteGlobalEvent).toHaveBeenCalledWith(705);
+      expect(latestGlobalEvents).toEqual([]);
+    });
+  });
+
+  it("does not delete a local global event when backend delete fails", async () => {
+    const setToast = vi.fn();
+    let latestGlobalEvents: GlobalEvent[] = [];
+    vi.mocked(deleteGlobalEvent).mockRejectedValueOnce(new Error("delete failed"));
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={true}
+        setToast={setToast}
+        initialGlobalEvents={[
+          {
+            id: 706,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText(/已設定：停課/));
+    await user.click(screen.getByRole("button", { name: "取消此事件" }));
+
+    await waitFor(() => {
+      expect(deleteGlobalEvent).toHaveBeenCalledWith(706);
+      expect(setToast).toHaveBeenCalledWith("刪除停課 / 假期失敗，請確認後端是否正常");
+    });
+    expect(latestGlobalEvents).toEqual([
+      expect.objectContaining({ id: 706, label: "停課" }),
+    ]);
+  });
+
+  it("keeps local global event delete when backend is unavailable", async () => {
+    let latestGlobalEvents: GlobalEvent[] = [];
+
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        isGlobalEventsBackendAvailable={false}
+        initialGlobalEvents={[
+          {
+            id: 707,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+        onGlobalEventsChange={(next) => {
+          latestGlobalEvents = next;
+        }}
+      />
+    );
+
+    await user.click(screen.getByText(/已設定：停課/));
+    await user.click(screen.getByRole("button", { name: "取消此事件" }));
+
+    expect(deleteGlobalEvent).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(latestGlobalEvents).toEqual([]);
     });
   });
 });
