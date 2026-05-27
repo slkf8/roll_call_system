@@ -566,6 +566,7 @@ export default function App() {
               sessions={sessions}
               setSessions={setSessions}
               isSessionsBackendAvailable={isSessionsBackendAvailable}
+              isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
               globalEvents={globalEvents}
               setGlobalEvents={setGlobalEvents}
               setToast={setToast}

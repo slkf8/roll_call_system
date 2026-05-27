@@ -1,5 +1,11 @@
 import { useState, useMemo, useContext, useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import {
+  createGlobalEvent,
+  deleteGlobalEvent as deleteBackendGlobalEvent,
+  updateGlobalEvent,
+} from "../api/globalEventsApi";
+import type { GlobalEventCreatePayload } from "../api/globalEventsApi";
 import { createSession, deleteSession, updateSession } from "../api/sessionsApi";
 import type { SessionUpdatePayload } from "../api/sessionsApi";
 
@@ -62,6 +68,7 @@ export interface MonthPageProps {
   sessions: Session[];
   setSessions: Dispatch<SetStateAction<Session[]>>;
   isSessionsBackendAvailable: boolean;
+  isGlobalEventsBackendAvailable: boolean;
   globalEvents: GlobalEvent[];
   setGlobalEvents: Dispatch<SetStateAction<GlobalEvent[]>>;
   setToast: Dispatch<SetStateAction<string>>;
@@ -133,6 +140,18 @@ function formatGlobalAlert(event: GlobalEvent | null) {
   return event.label;
 }
 
+function buildGlobalEventPayload(event: GlobalEvent): GlobalEventCreatePayload {
+  return {
+    dateISO: event.dateISO,
+    mode: event.mode,
+    label: event.label,
+    leaveReason: event.leaveReason ?? null,
+    start: event.mode === "timeRange" ? event.start ?? null : null,
+    end: event.mode === "timeRange" ? event.end ?? null : null,
+    note: event.note ?? null,
+  };
+}
+
 // ==========================================
 // Main Component
 // ==========================================
@@ -144,6 +163,7 @@ export default function MonthPage({
   sessions,
   setSessions,
   isSessionsBackendAvailable,
+  isGlobalEventsBackendAvailable,
   globalEvents,
   setGlobalEvents,
   setToast,
@@ -586,7 +606,7 @@ const handleDeleteSubmit = async () => {
     setDrawerGlobalSheetOpen(true);
   }
 
-  function saveDrawerGlobalEvent() {
+  async function saveDrawerGlobalEvent() {
     if (!editingDrawerGlobal.label.trim()) {
       setToast("請輸入事件名稱");
       return;
@@ -610,20 +630,45 @@ const handleDeleteSubmit = async () => {
     }
 
     const normalizedEvent: GlobalEvent = {
-    ...editingDrawerGlobal,
-    start: editingDrawerGlobal.mode === "timeRange" ? editingDrawerGlobal.start : undefined,
-    end: editingDrawerGlobal.mode === "timeRange" ? editingDrawerGlobal.end : undefined,
-    leaveReason:
+      ...editingDrawerGlobal,
+      start: editingDrawerGlobal.mode === "timeRange" ? editingDrawerGlobal.start : undefined,
+      end: editingDrawerGlobal.mode === "timeRange" ? editingDrawerGlobal.end : undefined,
+      leaveReason:
         editingDrawerGlobal.label === "停課"
-        ? editingDrawerGlobal.leaveReason
-        : undefined,
+          ? editingDrawerGlobal.leaveReason
+          : undefined,
     };
 
-    setGlobalEvents((prev) => {
-      const safePrev = prev || [];
-      const filtered = safePrev.filter((e) => e.dateISO !== normalizedEvent.dateISO);
-      return [...filtered, normalizedEvent];
-    });
+    if (isGlobalEventsBackendAvailable) {
+      try {
+        if (currentDrawerGlobalEvent) {
+          const updatedEvent = await updateGlobalEvent(
+            currentDrawerGlobalEvent.id,
+            buildGlobalEventPayload(normalizedEvent)
+          );
+          setGlobalEvents((prev) =>
+            (prev || []).map((e) => (e.id === updatedEvent.id ? updatedEvent : e))
+          );
+        } else {
+          const createdEvent = await createGlobalEvent(buildGlobalEventPayload(normalizedEvent));
+          setGlobalEvents((prev) => [...(prev || []), createdEvent]);
+        }
+      } catch (error) {
+        console.warn("Backend month global event save failed", error);
+        setToast(
+          currentDrawerGlobalEvent
+            ? "更新停課 / 假期失敗，請確認後端是否正常"
+            : "建立停課 / 假期失敗，請確認後端是否正常"
+        );
+        return;
+      }
+    } else {
+      setGlobalEvents((prev) => {
+        const safePrev = prev || [];
+        const filtered = safePrev.filter((e) => e.dateISO !== normalizedEvent.dateISO);
+        return [...filtered, normalizedEvent];
+      });
+    }
 
     setDrawerGlobalSheetOpen(false);
     setToast(
@@ -633,13 +678,26 @@ const handleDeleteSubmit = async () => {
     );
   }
 
-  function deleteDrawerGlobalEvent() {
+  async function deleteDrawerGlobalEvent() {
     if (!drawerDate) return;
 
-    setGlobalEvents((prev) => {
-      const safePrev = prev || [];
-      return safePrev.filter((e) => e.dateISO !== drawerDate);
-    });
+    if (isGlobalEventsBackendAvailable && currentDrawerGlobalEvent) {
+      try {
+        await deleteBackendGlobalEvent(currentDrawerGlobalEvent.id);
+        setGlobalEvents((prev) =>
+          (prev || []).filter((e) => e.id !== currentDrawerGlobalEvent.id)
+        );
+      } catch (error) {
+        console.warn("Backend month global event delete failed", error);
+        setToast("刪除停課 / 假期失敗，請確認後端是否正常");
+        return;
+      }
+    } else {
+      setGlobalEvents((prev) => {
+        const safePrev = prev || [];
+        return safePrev.filter((e) => e.dateISO !== drawerDate);
+      });
+    }
 
     setDrawerGlobalSheetOpen(false);
     setToast("已取消全局事件");
@@ -656,7 +714,7 @@ const handleDeleteSubmit = async () => {
   }
 
 
-const handleBatchMarkHoliday = () => {
+const handleBatchMarkHoliday = async () => {
   const selected = Array.from(selectedDates);
   if (selected.length === 0) {
     setToast("請先選擇日期");
@@ -675,6 +733,81 @@ const handleBatchMarkHoliday = () => {
   let updatedCount = 0;
   let unchangedCount = 0;
 
+  if (isGlobalEventsBackendAvailable) {
+    const currentEvents = safeEvents;
+    const createPayloads: GlobalEventCreatePayload[] = [];
+    const updateRequests: { id: number; payload: GlobalEventCreatePayload }[] = [];
+
+    for (const dateISO of selected) {
+      const existing = currentEvents.find((e) => e.dateISO === dateISO);
+
+      if (!existing) {
+        createPayloads.push({
+          dateISO,
+          mode: "allDay",
+          label: batchEventLabel,
+          leaveReason: nextLeaveReason ?? null,
+          start: null,
+          end: null,
+          note: null,
+        });
+        createdCount++;
+        continue;
+      }
+
+      const isSameAllDayEvent =
+        existing.mode === "allDay" &&
+        existing.label === batchEventLabel &&
+        (existing.leaveReason ?? undefined) === nextLeaveReason;
+
+      if (isSameAllDayEvent) {
+        unchangedCount++;
+        continue;
+      }
+
+      updateRequests.push({
+        id: existing.id,
+        payload: {
+          dateISO,
+          mode: "allDay",
+          label: batchEventLabel,
+          leaveReason: nextLeaveReason ?? null,
+          start: null,
+          end: null,
+          note: existing.note ?? null,
+        },
+      });
+      updatedCount++;
+    }
+
+    if (createdCount === 0 && updatedCount === 0) {
+      setToast(`所選日期已經是${batchEventLabel}，未做變更`);
+      setBatchEventSheetOpen(false);
+      setIsBatchMode(false);
+      setSelectedDates(new Set());
+      setBatchLeaveReason("");
+      return;
+    }
+
+    try {
+      const createdEvents = await Promise.all(
+        createPayloads.map((payload) => createGlobalEvent(payload))
+      );
+      const updatedEvents = await Promise.all(
+        updateRequests.map(({ id, payload }) => updateGlobalEvent(id, payload))
+      );
+      const updatedById = new Map(updatedEvents.map((event) => [event.id, event]));
+
+      setGlobalEvents((prev) => [
+        ...(prev || []).map((event) => updatedById.get(event.id) ?? event),
+        ...createdEvents,
+      ]);
+    } catch (error) {
+      console.warn("Backend month batch global event save failed", error);
+      setToast("批量設定停課 / 假期失敗，請確認後端是否正常");
+      return;
+    }
+  } else {
   setGlobalEvents((prev) => {
     const safePrev = prev || [];
     const next = [...safePrev];
@@ -719,6 +852,7 @@ const handleBatchMarkHoliday = () => {
 
     return next;
   });
+  }
 
   if (createdCount === 0 && updatedCount === 0) {
     setToast(`所選日期已經是${batchEventLabel}，未做變更`);
@@ -736,7 +870,7 @@ const handleBatchMarkHoliday = () => {
   setBatchLeaveReason("");
 };
 
-const handleBatchClearHoliday = () => {
+const handleBatchClearHoliday = async () => {
   const selected = Array.from(selectedDates);
 
   if (selected.length === 0) {
@@ -744,19 +878,25 @@ const handleBatchClearHoliday = () => {
     return;
   }
 
-  let clearedCount = 0;
+  const eventsToClear = safeEvents.filter((e) => selectedDates.has(e.dateISO));
+  const clearedCount = eventsToClear.length;
 
-  setGlobalEvents((prev) => {
-    const safePrev = prev || [];
-
-    return safePrev.filter((e) => {
-      if (selectedDates.has(e.dateISO)) {
-        clearedCount++;
-        return false;
-      }
-      return true;
+  if (isGlobalEventsBackendAvailable && clearedCount > 0) {
+    try {
+      await Promise.all(eventsToClear.map((event) => deleteBackendGlobalEvent(event.id)));
+      const clearedIds = new Set(eventsToClear.map((event) => event.id));
+      setGlobalEvents((prev) => (prev || []).filter((event) => !clearedIds.has(event.id)));
+    } catch (error) {
+      console.warn("Backend month batch global event clear failed", error);
+      setToast("批量設定停課 / 假期失敗，請確認後端是否正常");
+      return;
+    }
+  } else if (!isGlobalEventsBackendAvailable) {
+    setGlobalEvents((prev) => {
+      const safePrev = prev || [];
+      return safePrev.filter((e) => !selectedDates.has(e.dateISO));
     });
-  });
+  }
 
   if (clearedCount === 0) {
     setToast("所選日期沒有可清除的事件");
