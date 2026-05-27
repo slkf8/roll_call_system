@@ -1,0 +1,25 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+
+beforeEach(() => {
+  vi.resetModules();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+
+describe("config API_BASE_URL", () => {
+  it("falls back to http://127.0.0.1:8000 when VITE_API_BASE_URL is empty", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "");
+    const { API_BASE_URL } = await import("./config");
+    expect(API_BASE_URL).toBe("http://127.0.0.1:8000");
+  });
+
+  it("uses VITE_API_BASE_URL when provided", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://staging.example.com");
+    const { API_BASE_URL } = await import("./config");
+    expect(API_BASE_URL).toBe("https://staging.example.com");
+  });
+});
