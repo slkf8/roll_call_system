@@ -68,11 +68,19 @@ Implemented:
 - `POST /api/global-events`
 - `PATCH /api/global-events/{event_id}`
 - `DELETE /api/global-events/{event_id}`
+- `GET /api/statistics/monthly?month=YYYY-MM`
 
 Not implemented yet:
 
-- statistics
 - Excel export
 - DataPage backend integration
 - Excel backend integration
-- frontend global events integration
+- export endpoint
+
+Statistics scope:
+
+- Monthly statistics mirrors the current frontend DataPage counting rules.
+- It does not include Excel template matching.
+- It does not include Excel export.
+- It does not apply global event effective-status overrides.
+- It does not calculate schedule-rule expected lessons.

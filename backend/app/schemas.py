@@ -309,3 +309,43 @@ class GlobalEventRead(BaseModel):
     note: str | None
     createdAt: str = Field(description="ISO datetime")
     updatedAt: str = Field(description="ISO datetime")
+
+
+class MonthlyStatisticsSummary(BaseModel):
+    teacherServiceTotal: int
+    monthlySessionCount: int
+    presentCount: int
+    absentCount: int
+    pendingCount: int
+    cancelledCount: int
+    scheduleRuleCount: int
+    globalEventCount: int
+
+
+class MonthlyStatisticsStudentRow(BaseModel):
+    studentId: int
+    studentName: str
+    birthday: str
+    school: str
+    status: str
+    regularPresentCount: int
+    makeupPresentCount: int
+    extraPresentCount: int
+    totalPresentCount: int
+
+
+class MonthlyStatisticsWarning(BaseModel):
+    code: str
+    message: str
+    count: int
+
+
+class MonthlyStatisticsRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    month: str
+    from_date: str = Field(alias="from")
+    to: str
+    summary: MonthlyStatisticsSummary
+    students: list[MonthlyStatisticsStudentRow]
+    warnings: list[MonthlyStatisticsWarning]
