@@ -69,12 +69,14 @@ Implemented:
 - `PATCH /api/global-events/{event_id}`
 - `DELETE /api/global-events/{event_id}`
 - `GET /api/statistics/monthly?month=YYYY-MM`
+- `POST /api/exports/excel/fill-template`
 
 Not implemented yet:
 
-- Excel export
-- Excel backend integration
-- export endpoint
+- DataPage frontend export integration
+- Excel template parsing backend integration
+- Excel column detection backend integration
+- Excel row matching backend integration
 
 Statistics scope:
 
@@ -84,3 +86,14 @@ Statistics scope:
 - It does not include Excel export.
 - It does not apply global event effective-status overrides.
 - It does not calculate schedule-rule expected lessons.
+
+Excel export scope:
+
+- `POST /api/exports/excel/fill-template` only performs final `.xlsx` cell writes.
+- It does not parse templates for columns.
+- It does not identify name / birthday / direct-service columns.
+- It does not match student rows.
+- It does not create previews.
+- It does not calculate statistics.
+- The first version only supports `.xlsx` files.
+- Frontend DataPage export is not connected to this endpoint yet.

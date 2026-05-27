@@ -1,3 +1,4 @@
+import math
 import re
 from typing import Literal
 
@@ -12,6 +13,8 @@ SessionKind = Literal["regular", "makeup", "extra"]
 GlobalEventMode = Literal["allDay", "timeRange"]
 
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+CELL_ADDRESS_PATTERN = re.compile(r"^[A-Za-z]{1,3}[1-9][0-9]*$")
 
 
 def _trim_name(value: str) -> str:
@@ -349,3 +352,55 @@ class MonthlyStatisticsRead(BaseModel):
     summary: MonthlyStatisticsSummary
     students: list[MonthlyStatisticsStudentRow]
     warnings: list[MonthlyStatisticsWarning]
+
+
+class ExcelFillWrite(BaseModel):
+    cellAddress: str
+    value: int | float
+    studentId: int | None = None
+    studentName: str | None = None
+    birthday: str | None = None
+    reason: str | None = None
+
+    @field_validator("cellAddress")
+    @classmethod
+    def validate_cell_address(cls, value: str) -> str:
+        cell_address = value.strip().upper()
+        if not CELL_ADDRESS_PATTERN.match(cell_address):
+            raise ValueError("cellAddress must be a single cell address")
+        return cell_address
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_value(cls, value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("value must be a number")
+        if not math.isfinite(float(value)):
+            raise ValueError("value must be a finite number")
+        return value
+
+
+class ExcelFillOptions(BaseModel):
+    preserveTemplate: bool = True
+
+
+class ExcelFillTemplatePayload(BaseModel):
+    worksheetName: str
+    month: str
+    writes: list[ExcelFillWrite]
+    options: ExcelFillOptions = Field(default_factory=ExcelFillOptions)
+
+    @field_validator("worksheetName")
+    @classmethod
+    def validate_worksheet_name(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("worksheetName must not be empty")
+        return trimmed
+
+    @field_validator("month")
+    @classmethod
+    def validate_month(cls, value: str) -> str:
+        if not MONTH_PATTERN.match(value):
+            raise ValueError("month must use YYYY-MM")
+        return value
