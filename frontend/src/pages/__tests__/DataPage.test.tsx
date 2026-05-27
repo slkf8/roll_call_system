@@ -6,8 +6,10 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
+import { fetchMonthlyStatistics } from "../../api/statisticsApi";
+import type { MonthlyStatistics } from "../../api/statisticsApi";
 import DataPage from "../DataPage";
 import type {
   GlobalEvent,
@@ -15,6 +17,10 @@ import type {
   StudentProfile,
   StudentScheduleRule,
 } from "../../shared/appShared";
+
+vi.mock("../../api/statisticsApi", () => ({
+  fetchMonthlyStatistics: vi.fn(),
+}));
 
 type Snapshot = {
   selectedDate: string;
@@ -25,6 +31,49 @@ type Snapshot = {
 
 const selectedDate = "2026-11-15";
 const xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function makeMonthlyStatistics(overrides: Partial<MonthlyStatistics> = {}): MonthlyStatistics {
+  const base: MonthlyStatistics = {
+    month: "2026-11",
+    from: "2026-11-01",
+    to: "2026-11-30",
+    summary: {
+      teacherServiceTotal: 42,
+      monthlySessionCount: 99,
+      presentCount: 77,
+      absentCount: 8,
+      pendingCount: 6,
+      cancelledCount: 5,
+      scheduleRuleCount: 3,
+      globalEventCount: 2,
+    },
+    students: [
+      {
+        studentId: 101,
+        studentName: "後端統計學生",
+        birthday: "2014-04-05",
+        school: "後端學校",
+        status: "active",
+        regularPresentCount: 10,
+        makeupPresentCount: 2,
+        extraPresentCount: 1,
+        totalPresentCount: 13,
+      },
+    ],
+    warnings: [],
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    summary: {
+      ...base.summary,
+      ...(overrides.summary ?? {}),
+    },
+    students: overrides.students ?? base.students,
+    warnings: overrides.warnings ?? base.warnings,
+  };
+}
 
 function makeStudents(): StudentProfile[] {
   return [
@@ -361,6 +410,12 @@ function getSelect(label: string) {
   return screen.getByLabelText(label) as HTMLSelectElement;
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(fetchMonthlyStatistics).mockRejectedValue(new Error("statistics unavailable"));
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -390,6 +445,84 @@ describe("DataPage", () => {
     expect(getValueNearLabel("本月缺席次數").getByText("1")).toBeInTheDocument();
     expect(getValueNearLabel("未完成點名").getByText("1")).toBeInTheDocument();
     expect(getValueNearLabel("本月課次總數").getByText("8")).toBeInTheDocument();
+  });
+
+  it("loads backend statistics for the selected month", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(makeMonthlyStatistics());
+
+    renderDataPage({ initialSelectedDate: "2026-06-15" });
+
+    await waitFor(() => expect(fetchMonthlyStatistics).toHaveBeenCalledWith("2026-06"));
+  });
+
+  it("uses backend statistics for summary cards when available", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(makeMonthlyStatistics());
+
+    renderDataPage();
+
+    await waitFor(() =>
+      expect(getValueNearLabel("老師服務總次數").getByText("42")).toBeInTheDocument()
+    );
+    expect(getValueNearLabel("本月出席次數").getByText("77")).toBeInTheDocument();
+    expect(getValueNearLabel("本月缺席次數").getByText("8")).toBeInTheDocument();
+    expect(getValueNearLabel("未完成點名").getByText("6")).toBeInTheDocument();
+    expect(getValueNearLabel("本月課次總數").getByText("99")).toBeInTheDocument();
+  });
+
+  it("uses backend statistics for per-student rows when available", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(makeMonthlyStatistics());
+
+    renderDataPage();
+
+    const section = getSectionByHeading("每學生出席次數");
+    await within(section).findByText("後端統計學生");
+
+    const backendRow = getRowByCell(section, "後端統計學生");
+    expect(within(backendRow).getByText("2014-04-05")).toBeInTheDocument();
+    expect(within(backendRow).getByText("後端學校")).toBeInTheDocument();
+    expect(within(backendRow).getByText("10")).toBeInTheDocument();
+    expect(within(backendRow).getByText("2")).toBeInTheDocument();
+    expect(within(backendRow).getByText("13")).toBeInTheDocument();
+  });
+
+  it("treats empty backend statistics as a valid empty result", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(
+      makeMonthlyStatistics({
+        summary: {
+          teacherServiceTotal: 0,
+          monthlySessionCount: 0,
+          presentCount: 0,
+          absentCount: 0,
+          pendingCount: 0,
+          cancelledCount: 0,
+          scheduleRuleCount: 0,
+          globalEventCount: 0,
+        },
+        students: [],
+      })
+    );
+
+    renderDataPage();
+
+    await waitFor(() =>
+      expect(getValueNearLabel("老師服務總次數").getByText("0")).toBeInTheDocument()
+    );
+    const section = getSectionByHeading("每學生出席次數");
+    expect(within(section).queryByText("陳小明")).not.toBeInTheDocument();
+    expect(screen.getByText("尚未建立學生資料。")).toBeInTheDocument();
+  });
+
+  it("falls back to local statistics when backend statistics fails", async () => {
+    renderDataPage();
+
+    await screen.findByText("統計資料暫時無法從後端載入，已使用本地資料");
+
+    expect(getValueNearLabel("老師服務總次數").getByText("6")).toBeInTheDocument();
+    expect(getValueNearLabel("本月出席次數").getByText("6")).toBeInTheDocument();
+    expect(getValueNearLabel("本月缺席次數").getByText("1")).toBeInTheDocument();
+    expect(getValueNearLabel("未完成點名").getByText("1")).toBeInTheDocument();
+    expect(getValueNearLabel("本月課次總數").getByText("8")).toBeInTheDocument();
+    expect(screen.getByText("陳小明")).toBeInTheDocument();
   });
 
   it("shows per-student attendance counts", () => {

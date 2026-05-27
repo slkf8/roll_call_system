@@ -1,6 +1,8 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import * as XLSX from "xlsx";
+import { fetchMonthlyStatistics } from "../api/statisticsApi";
+import type { MonthlyStatistics, MonthlyStatisticsStudentRow } from "../api/statisticsApi";
 import type {
   GlobalEvent,
   Session,
@@ -123,6 +125,11 @@ function formatMonthLabel(dateISO: string) {
 function formatMonthShortLabel(dateISO: string) {
   const anchor = parseMonthAnchor(dateISO);
   return `${anchor.getMonth() + 1}月`;
+}
+
+function formatMonthToken(dateISO: string) {
+  const anchor = parseMonthAnchor(dateISO);
+  return `${anchor.getFullYear()}-${pad2(anchor.getMonth() + 1)}`;
 }
 
 function formatDateISO(date: Date) {
@@ -513,6 +520,24 @@ function getColumnLetters(cellAddress?: string) {
   return cellAddress?.match(/^[A-Z]+/)?.[0] ?? "—";
 }
 
+function statisticsStudentRowToAttendanceRow(
+  row: MonthlyStatisticsStudentRow
+): StudentAttendanceRow {
+  return {
+    student: {
+      id: row.studentId,
+      name: row.studentName,
+      birthday: row.birthday,
+      school: row.school,
+      status: row.status as StudentProfile["status"],
+    },
+    regularPresentCount: row.regularPresentCount,
+    makeupPresentCount: row.makeupPresentCount,
+    extraPresentCount: row.extraPresentCount,
+    totalPresentCount: row.totalPresentCount,
+  };
+}
+
 export default function DataPage({
   setTheme,
   selectedDate,
@@ -542,17 +567,21 @@ export default function DataPage({
   const [duplicatedMatches, setDuplicatedMatches] = useState<DuplicatedMatch[]>([]);
   const [templateReadError, setTemplateReadError] = useState("");
   const [isExportConfirmOpen, setIsExportConfirmOpen] = useState(false);
+  const [backendStatistics, setBackendStatistics] = useState<MonthlyStatistics | null>(null);
+  const [isStatisticsBackendAvailable, setIsStatisticsBackendAvailable] = useState(false);
+  const [statisticsError, setStatisticsError] = useState<string | null>(null);
 
   const monthRange = useMemo(() => getMonthRange(selectedDate), [selectedDate]);
   const monthLabel = formatMonthLabel(selectedDate);
   const monthShortLabel = formatMonthShortLabel(selectedDate);
+  const monthToken = formatMonthToken(selectedDate);
 
   const monthlySessions = useMemo(
     () => sessions.filter((session) => isInRange(session.dateISO, monthRange)),
     [sessions, monthRange]
   );
 
-  const attendanceRows = useMemo<StudentAttendanceRow[]>(() => {
+  const localAttendanceRows = useMemo<StudentAttendanceRow[]>(() => {
     return [...students].sort(sortStudents).map((student) => {
       const studentMonthlyPresentSessions = monthlySessions.filter(
         (session) => session.studentId === student.id && session.status === "present"
@@ -578,7 +607,7 @@ export default function DataPage({
     });
   }, [students, monthlySessions]);
 
-  const teacherServiceTotal = attendanceRows.reduce(
+  const localTeacherServiceTotal = localAttendanceRows.reduce(
     (total, row) => total + row.totalPresentCount,
     0
   );
@@ -592,6 +621,52 @@ export default function DataPage({
   const monthlyPendingCount = monthlySessions.filter(
     (session) => session.status === "pending"
   ).length;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchMonthlyStatistics(monthToken)
+      .then((result) => {
+        if (cancelled) return;
+        setBackendStatistics(result);
+        setIsStatisticsBackendAvailable(true);
+        setStatisticsError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setBackendStatistics(null);
+        setIsStatisticsBackendAvailable(false);
+        setStatisticsError("統計資料暫時無法從後端載入，已使用本地資料");
+        console.warn("Backend statistics unavailable, using local data", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [monthToken]);
+
+  const displayAttendanceRows = useMemo(
+    () =>
+      isStatisticsBackendAvailable && backendStatistics
+        ? backendStatistics.students.map(statisticsStudentRowToAttendanceRow)
+        : localAttendanceRows,
+    [backendStatistics, isStatisticsBackendAvailable, localAttendanceRows]
+  );
+
+  const displaySummary =
+    isStatisticsBackendAvailable && backendStatistics
+      ? backendStatistics.summary
+      : {
+          teacherServiceTotal: localTeacherServiceTotal,
+          monthlySessionCount: monthlySessions.length,
+          presentCount: monthlyPresentCount,
+          absentCount: monthlyAbsentCount,
+          pendingCount: monthlyPendingCount,
+          cancelledCount: monthlySessions.filter((session) => session.status === "cancelled")
+            .length,
+          scheduleRuleCount: studentScheduleRules.length,
+          globalEventCount: globalEvents.length,
+        };
 
   const directServiceOptions = useMemo(
     () => uniqueDirectServiceOptions(columnCandidates, availableColumns),
@@ -612,13 +687,13 @@ export default function DataPage({
       nameColumn,
       birthdayColumn,
       directServiceColumn,
-      attendanceRows,
+      attendanceRows: localAttendanceRows,
     });
 
     setMatchedRows(result.matchedRows);
     setUnmatchedStudents(result.unmatchedStudents);
     setDuplicatedMatches(result.duplicatedMatches);
-  }, [worksheetData, nameColumn, birthdayColumn, directServiceColumn, attendanceRows]);
+  }, [worksheetData, nameColumn, birthdayColumn, directServiceColumn, localAttendanceRows]);
 
   function applyWorksheet(nextWorkbook: XLSX.WorkBook, sheetName: string) {
     const worksheet = nextWorkbook.Sheets[sheetName];
@@ -713,10 +788,10 @@ export default function DataPage({
     : "w-full rounded-2xl border border-[#E5E5EA] bg-white px-4 py-3 text-[15px] text-[#1C1C1E] outline-none";
 
   const serviceCards = [
-    { label: "本月出席次數", value: monthlyPresentCount },
-    { label: "本月缺席次數", value: monthlyAbsentCount },
-    { label: "未完成點名", value: monthlyPendingCount },
-    { label: "本月課次總數", value: monthlySessions.length },
+    { label: "本月出席次數", value: displaySummary.presentCount },
+    { label: "本月缺席次數", value: displaySummary.absentCount },
+    { label: "未完成點名", value: displaySummary.pendingCount },
+    { label: "本月課次總數", value: displaySummary.monthlySessionCount },
   ];
 
   const canExportFilledTemplate = Boolean(
@@ -873,7 +948,7 @@ export default function DataPage({
                     老師服務總次數
                   </div>
                   <div className="mt-3 text-[48px] font-extrabold leading-none tracking-[-0.06em]">
-                    {teacherServiceTotal}
+                    {displaySummary.teacherServiceTotal}
                   </div>
                   <div className={`mt-3 text-[13px] leading-5 ${mutedTextClass}`}>
                     由每位學生的 regular / makeup / extra 出席合計加總。
@@ -907,10 +982,15 @@ export default function DataPage({
                   </div>
                   <div className={`mt-1 text-[13px] ${mutedTextClass}`}>
                     用於填寫「個別 / 直接服務」欄
+                    {statisticsError ? (
+                      <div className="mt-1 text-[12px] text-[#ff9500]">
+                        {statisticsError}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="text-[13px] font-semibold text-[#007AFF]">
-                  個別直接服務合計：{teacherServiceTotal} 次
+                  個別直接服務合計：{displaySummary.teacherServiceTotal} 次
                 </div>
               </div>
 
@@ -931,7 +1011,7 @@ export default function DataPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {attendanceRows.map((row) => (
+                    {displayAttendanceRows.map((row) => (
                       <tr key={row.student.id}>
                         <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
                           {row.student.name}
@@ -963,7 +1043,7 @@ export default function DataPage({
                 </table>
               </div>
 
-              {attendanceRows.length === 0 ? (
+              {displayAttendanceRows.length === 0 ? (
                 <div className={`py-8 text-center text-[14px] ${mutedTextClass}`}>
                   尚未建立學生資料。
                 </div>
