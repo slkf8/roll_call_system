@@ -6,6 +6,7 @@ import DataPage from "./pages/DataPage";
 import { fetchStudents } from "./api/studentsApi";
 import { fetchScheduleRules } from "./api/scheduleRulesApi";
 import { fetchSessions } from "./api/sessionsApi";
+import { fetchGlobalEvents } from "./api/globalEventsApi";
 import type {
   TabKey,
   TabDef,
@@ -398,6 +399,7 @@ export default function App() {
   const [isStudentsBackendAvailable, setIsStudentsBackendAvailable] = useState(false);
   const [isScheduleRulesBackendAvailable, setIsScheduleRulesBackendAvailable] = useState(false);
   const [isSessionsBackendAvailable, setIsSessionsBackendAvailable] = useState(false);
+  const [, setIsGlobalEventsBackendAvailable] = useState(false);
 
   const [studentScheduleRules, setStudentScheduleRules] = useState<StudentScheduleRule[]>(() => {
     if (restoredData) {
@@ -409,6 +411,21 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    async function loadGlobalEvents() {
+      try {
+        const backendGlobalEvents = await fetchGlobalEvents();
+        if (!cancelled) {
+          setGlobalEvents(backendGlobalEvents);
+          setIsGlobalEventsBackendAvailable(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setIsGlobalEventsBackendAvailable(false);
+        }
+        console.warn("Backend global events unavailable, using local data", error);
+      }
+    }
 
     fetchStudents()
       .then(async (backendStudents) => {
@@ -457,6 +474,9 @@ export default function App() {
           setIsSessionsBackendAvailable(false);
         }
         console.warn("Backend students unavailable, using local data", error);
+      })
+      .finally(() => {
+        void loadGlobalEvents();
       });
 
     return () => {

@@ -80,6 +80,22 @@ function backendSessionResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function backendGlobalEventResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 8001,
+    dateISO: "2026-06-01",
+    mode: "allDay",
+    label: "假期",
+    leaveReason: "惡劣天氣",
+    start: null,
+    end: null,
+    note: null,
+    createdAt: "2026-05-25T10:00:00",
+    updatedAt: "2026-05-25T10:00:00",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   installMemoryLocalStorage();
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -291,6 +307,149 @@ describe("App empty data safety", () => {
       ]);
     });
     expect(screen.queryByText("後端課次學生")).not.toBeInTheDocument();
+  });
+
+  it("loads backend global events after startup", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendGlobalEventResponse()],
+      } as Response);
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出席紀錄系統")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/global-events");
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.globalEvents).toEqual([
+        expect.objectContaining({
+          id: 8001,
+          dateISO: "2026-06-01",
+          mode: "allDay",
+          label: "假期",
+          leaveReason: "惡劣天氣",
+        }),
+      ]);
+    });
+  });
+
+  it("treats an empty backend global events response as a valid empty source", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response);
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [
+        {
+          id: 1,
+          dateISO: "2026-06-01",
+          mode: "allDay",
+          label: "假期",
+          leaveReason: "惡劣天氣",
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出席紀錄系統")).toBeInTheDocument();
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.globalEvents).toEqual([]);
+    });
+  });
+
+  it("keeps fallback global events when backend global events loading fails", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [backendStudentResponse()],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as Response)
+      .mockRejectedValueOnce(new Error("global events unavailable"));
+    setStoredAppData({
+      activeTab: "today",
+      selectedDate: "2026-06-01",
+      students: [],
+      sessions: [],
+      studentScheduleRules: [],
+      globalEvents: [
+        {
+          id: 1,
+          dateISO: "2026-06-01",
+          mode: "timeRange",
+          label: "停課",
+          leaveReason: "病假",
+          start: "15:00",
+          end: "18:00",
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出席紀錄系統")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/global-events");
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      expect(saved.globalEvents).toEqual([
+        expect.objectContaining({
+          id: 1,
+          dateISO: "2026-06-01",
+          mode: "timeRange",
+          label: "停課",
+          leaveReason: "病假",
+          start: "15:00",
+          end: "18:00",
+        }),
+      ]);
+    });
   });
 
   it("treats an empty backend students response as a valid empty source", async () => {
