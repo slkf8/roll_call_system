@@ -1,6 +1,8 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import * as XLSX from "xlsx";
+import { fillExcelTemplate } from "../api/exportsApi";
+import type { ExcelFillTemplatePayload } from "../api/exportsApi";
 import { fetchMonthlyStatistics } from "../api/statisticsApi";
 import type { MonthlyStatistics, MonthlyStatisticsStudentRow } from "../api/statisticsApi";
 import type {
@@ -104,6 +106,8 @@ type ColumnAnalysis = {
   directServiceColumn: string;
   columnCandidates: TemplateColumnCandidate[];
 };
+
+const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 async function loadXlsxPopulate() {
   // @ts-expect-error xlsx-populate browser bundle does not publish TypeScript declarations.
@@ -808,6 +812,77 @@ export default function DataPage({
     await exportFilledTemplate();
   }
 
+  function downloadFilledTemplate(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildExportFileName(templateFileName, selectedDate);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportFilledTemplateWithBackend() {
+    if (!templateArrayBuffer) {
+      throw new Error("Template buffer is required");
+    }
+
+    const templateBlob = new Blob([templateArrayBuffer.slice(0)], {
+      type: XLSX_MEDIA_TYPE,
+    });
+    const payload: ExcelFillTemplatePayload = {
+      worksheetName: selectedSheetName,
+      month: monthToken,
+      writes: matchedRows.map((row) => ({
+        cellAddress: row.cellAddress,
+        value: row.value,
+        studentId: row.student.id,
+        studentName: row.student.name,
+        birthday: row.student.birthday || null,
+        reason: "direct_service_count",
+      })),
+      options: {
+        preserveTemplate: true,
+      },
+    };
+
+    return fillExcelTemplate(templateBlob, payload);
+  }
+
+  async function exportFilledTemplateLocally() {
+    if (!templateArrayBuffer) {
+      throw new Error("Template buffer is required");
+    }
+
+    const XlsxPopulate = await loadXlsxPopulate();
+    const populatedWorkbook = await XlsxPopulate.fromDataAsync(templateArrayBuffer.slice(0));
+    const sheet = populatedWorkbook.sheet(selectedSheetName);
+
+    if (!sheet) {
+      throw new Error("Selected worksheet not found");
+    }
+
+    matchedRows.forEach((row) => {
+      sheet.cell(row.cellAddress).value(row.value);
+    });
+
+    const output = await populatedWorkbook.outputAsync();
+    if (output instanceof Blob) {
+      return output;
+    }
+    if (output instanceof Uint8Array) {
+      const outputBuffer = new ArrayBuffer(output.byteLength);
+      new Uint8Array(outputBuffer).set(output);
+      return new Blob([outputBuffer], {
+        type: XLSX_MEDIA_TYPE,
+      });
+    }
+    return new Blob([output], {
+      type: XLSX_MEDIA_TYPE,
+    });
+  }
+
   async function exportFilledTemplate() {
     if (!templateArrayBuffer) {
       setToast("請先選擇 xlsx 模板");
@@ -830,43 +905,18 @@ export default function DataPage({
     }
 
     try {
-      const XlsxPopulate = await loadXlsxPopulate();
-      const populatedWorkbook = await XlsxPopulate.fromDataAsync(templateArrayBuffer.slice(0));
-      const sheet = populatedWorkbook.sheet(selectedSheetName);
+      const blob = await exportFilledTemplateWithBackend();
+      downloadFilledTemplate(blob);
+      setToast(`已匯出並填入 ${matchedRows.length} 筆資料`);
+      return;
+    } catch (backendError) {
+      console.warn("Backend Excel export failed, using local export", backendError);
+      setToast("後端匯出失敗，已使用本地匯出");
+    }
 
-      if (!sheet) {
-        setToast("找不到目前選擇的工作表");
-        return;
-      }
-
-      matchedRows.forEach((row) => {
-        sheet.cell(row.cellAddress).value(row.value);
-      });
-
-      const output = await populatedWorkbook.outputAsync();
-      let blob: Blob;
-      if (output instanceof Blob) {
-        blob = output;
-      } else if (output instanceof Uint8Array) {
-        const outputBuffer = new ArrayBuffer(output.byteLength);
-        new Uint8Array(outputBuffer).set(output);
-        blob = new Blob([outputBuffer], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-      } else {
-        blob = new Blob([output], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-      }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = buildExportFileName(templateFileName, selectedDate);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-
+    try {
+      const blob = await exportFilledTemplateLocally();
+      downloadFilledTemplate(blob);
       setToast(`已匯出並填入 ${matchedRows.length} 筆資料`);
     } catch (error) {
       console.error("Export filled template failed", error);

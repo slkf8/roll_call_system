@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
+import { fillExcelTemplate } from "../../api/exportsApi";
 import { fetchMonthlyStatistics } from "../../api/statisticsApi";
 import type { MonthlyStatistics } from "../../api/statisticsApi";
 import DataPage from "../DataPage";
@@ -20,6 +21,10 @@ import type {
 
 vi.mock("../../api/statisticsApi", () => ({
   fetchMonthlyStatistics: vi.fn(),
+}));
+
+vi.mock("../../api/exportsApi", () => ({
+  fillExcelTemplate: vi.fn(),
 }));
 
 type Snapshot = {
@@ -413,6 +418,7 @@ function getSelect(label: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchMonthlyStatistics).mockRejectedValue(new Error("statistics unavailable"));
+  vi.mocked(fillExcelTemplate).mockRejectedValue(new Error("backend export unavailable"));
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
@@ -667,6 +673,65 @@ describe("DataPage", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
+  it("uses backend export first and downloads the backend blob", async () => {
+    const { user, container, snapshot } = renderDataPage();
+    const file = workbookToFile(createSyntheticTemplateWorkbook(), "synthetic-template.xlsx");
+    const backendBlob = new Blob(["backend-filled"], { type: xlsxMime });
+    let exportedBlob: Blob | null = null;
+    let downloadName = "";
+    vi.mocked(fillExcelTemplate).mockResolvedValue(backendBlob);
+
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlob = blob;
+        return "blob:mock";
+      }),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function mockClick(
+      this: HTMLAnchorElement
+    ) {
+      downloadName = this.download;
+    });
+
+    await uploadTemplate(user, container, file);
+    await waitFor(() => expect(getValueNearLabel("成功匹配").getByText("3")).toBeInTheDocument());
+    expect(screen.getByText("AC6")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+    await user.click(screen.getByRole("button", { name: "確認匯出" }));
+
+    await waitFor(() => expect(exportedBlob).toBe(backendBlob));
+    expect(downloadName).toBe("synthetic-template_2026-11_已填寫.xlsx");
+    expect(fillExcelTemplate).toHaveBeenCalledWith(
+      expect.any(Blob),
+      expect.objectContaining({
+        worksheetName: "Sheet1",
+        month: "2026-11",
+        writes: expect.arrayContaining([
+          expect.objectContaining({
+            cellAddress: "AC6",
+            value: 4,
+            studentId: 1,
+            studentName: "陳小明",
+            birthday: "2012-03-08",
+            reason: "direct_service_count",
+          }),
+        ]),
+        options: {
+          preserveTemplate: true,
+        },
+      })
+    );
+    expect(getValueNearLabel("成功匹配").getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("AC6")).toBeInTheDocument();
+    await waitFor(() => expect(snapshot.toasts).toContain("已匯出並填入 3 筆資料"));
+  });
+
   it("exports a filled workbook and only writes matched target cells", async () => {
     const { user, container, snapshot } = renderDataPage();
     const file = workbookToFile(createSyntheticTemplateWorkbook(), "synthetic-template.xlsx");
@@ -699,6 +764,8 @@ describe("DataPage", () => {
 
     await waitFor(() => expect(exportedBlob).not.toBeNull());
     expect(downloadName).toBe("synthetic-template_2026-11_已填寫.xlsx");
+    expect(fillExcelTemplate).toHaveBeenCalled();
+    await waitFor(() => expect(snapshot.toasts).toContain("後端匯出失敗，已使用本地匯出"));
     await waitFor(() => expect(snapshot.toasts).toContain("已匯出並填入 3 筆資料"));
 
     const blob = exportedBlob;
