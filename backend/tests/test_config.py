@@ -197,3 +197,46 @@ def test_get_data_dir_env_overrides_packaged_mode(monkeypatch, tmp_path):
 
     assert result == target
     assert target.exists()
+
+
+# ---------- frontend dist resolution ----------
+
+
+def test_get_frontend_dist_dir_env_override_existing(monkeypatch, tmp_path):
+    target = tmp_path / "custom-dist"
+    target.mkdir()
+    monkeypatch.setenv("ROLL_CALL_FRONTEND_DIST", str(target))
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    assert config.get_frontend_dist_dir() == target
+
+
+def test_get_frontend_dist_dir_env_override_missing_returns_none(monkeypatch, tmp_path):
+    target = tmp_path / "does-not-exist"
+    monkeypatch.setenv("ROLL_CALL_FRONTEND_DIST", str(target))
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    assert config.get_frontend_dist_dir() is None
+
+
+def test_get_frontend_dist_dir_packaged_uses_meipass(monkeypatch, tmp_path):
+    bundled = tmp_path / "frontend_dist"
+    bundled.mkdir()
+    monkeypatch.delenv("ROLL_CALL_FRONTEND_DIST", raising=False)
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert config.get_frontend_dist_dir() == bundled
+
+
+def test_get_frontend_dist_dir_packaged_meipass_missing_returns_none(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("ROLL_CALL_FRONTEND_DIST", raising=False)
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    # _MEIPASS points at tmp_path but no frontend_dist subdir exists.
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert config.get_frontend_dist_dir() is None

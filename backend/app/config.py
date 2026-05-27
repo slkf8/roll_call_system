@@ -9,6 +9,8 @@ Optional environment variables:
   ROLL_CALL_PACKAGED         Force packaged mode (1/true/yes) or source mode
                              (0/false/no). When unset, falls back to
                              sys.frozen (set by PyInstaller).
+  ROLL_CALL_FRONTEND_DIST    Directory containing built frontend assets.
+                             Highest priority — overrides packaged/dev defaults.
   ROLL_CALL_ALLOWED_ORIGINS  Comma-separated CORS origins
                              (default: localhost:5173 + 127.0.0.1:5173).
   ROLL_CALL_HOST / HOST      Bind host (default: 127.0.0.1).
@@ -18,6 +20,11 @@ Data directory resolution (highest priority first):
   1. ROLL_CALL_DATA_DIR if set.
   2. Packaged mode -> platformdirs.user_data_dir("RollCall", appauthor=False).
   3. Dev source mode -> <repo>/backend/data.
+
+Frontend dist resolution (highest priority first):
+  1. ROLL_CALL_FRONTEND_DIST if set and the directory exists.
+  2. Packaged mode -> sys._MEIPASS / "frontend_dist" when present.
+  3. Dev source mode -> <repo>/frontend/dist when it exists.
 """
 from __future__ import annotations
 
@@ -90,6 +97,36 @@ def get_data_dir() -> Path:
 def get_database_url() -> str:
     """SQLite URL for the app database, anchored at the data directory."""
     return f"sqlite:///{get_data_dir() / 'app.db'}"
+
+
+def get_frontend_dist_dir() -> Path | None:
+    """Locate the built frontend assets directory if available.
+
+    Resolution order (first existing directory wins):
+      1. ROLL_CALL_FRONTEND_DIST env var.
+      2. Packaged mode -> ``sys._MEIPASS / "frontend_dist"`` (PyInstaller).
+      3. Dev source mode -> ``<repo>/frontend/dist``.
+
+    Returns ``None`` if no resolved path exists. Callers decide how to
+    react (dev: warn and skip mounting; packaged: fail fast).
+    """
+    raw = os.getenv("ROLL_CALL_FRONTEND_DIST")
+    if raw:
+        candidate = Path(raw).expanduser()
+        return candidate if candidate.is_dir() else None
+
+    if _is_packaged():
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate = Path(meipass) / "frontend_dist"
+            return candidate if candidate.is_dir() else None
+        return None
+
+    # Dev source mode -> <repo>/frontend/dist
+    candidate = (
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    )
+    return candidate if candidate.is_dir() else None
 
 
 def get_allowed_origins() -> list[str]:

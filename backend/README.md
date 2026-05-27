@@ -13,9 +13,25 @@ pip install -r requirements.txt
 
 ## Run
 
+### Dev (hot reload)
+
 ```bash
 uvicorn app.main:app --reload
 ```
+
+### Production (single port, serves built frontend)
+
+```bash
+# 1. Build the frontend first.
+cd ../frontend && npm run build && cd ../backend
+
+# 2. Launch the production runner.
+python run.py
+```
+
+`run.py` disables uvicorn `--reload`, pre-populates same-port CORS origins
+(`http://localhost:{port}` + `http://127.0.0.1:{port}`) when the user has
+not set `ROLL_CALL_ALLOWED_ORIGINS`, and prints the bound URL on startup.
 
 Health check:
 
@@ -29,6 +45,12 @@ API docs:
 http://127.0.0.1:8000/docs
 ```
 
+Frontend (when `frontend/dist` is built and discoverable):
+
+```text
+http://127.0.0.1:8000/
+```
+
 ## Optional environment variables
 
 These let you override defaults without code changes (useful for packaged
@@ -39,6 +61,11 @@ builds and CI):
 - `ROLL_CALL_PACKAGED` — force packaged mode (`1` / `true` / `yes`) or
   source mode (`0` / `false` / `no`). When unset, the app falls back to
   `sys.frozen` (set automatically by PyInstaller). Invalid values raise.
+- `ROLL_CALL_FRONTEND_DIST` — directory of built frontend assets.
+  Highest priority; overrides packaged (`sys._MEIPASS/frontend_dist`) and
+  dev (`<repo>/frontend/dist`) defaults. The mount is skipped (with a
+  warning) when the path resolves to nothing in dev source mode, and
+  raises in packaged mode.
 - `ROLL_CALL_ALLOWED_ORIGINS` — comma-separated CORS origins. Defaults to
   the Vite dev origins (`http://localhost:5173`, `http://127.0.0.1:5173`).
 - `ROLL_CALL_HOST` / `HOST` — bind host (default `127.0.0.1`). Currently
