@@ -8,6 +8,12 @@
 !.env.example
 !**/.env.example
 
+# Claude Code local-only overrides
+.claude/settings.local.json
+
+# Local test artifacts (real templates etc., not for git)
+test_artifacts/
+
 # Python
 __pycache__/
 *.pyc
