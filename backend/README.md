@@ -73,7 +73,6 @@ Implemented:
 
 Not implemented yet:
 
-- DataPage frontend export integration
 - Excel template parsing backend integration
 - Excel column detection backend integration
 - Excel row matching backend integration
@@ -96,4 +95,4 @@ Excel export scope:
 - It does not create previews.
 - It does not calculate statistics.
 - The first version only supports `.xlsx` files.
-- Frontend DataPage export is not connected to this endpoint yet.
+- Frontend DataPage export now prioritizes this endpoint and keeps the browser `xlsx-populate` export as fallback.
