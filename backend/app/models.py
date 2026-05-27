@@ -144,3 +144,39 @@ class AttendanceSession(Base):
         Index("idx_sessions_schedule_rule_id", "schedule_rule_id"),
         Index("idx_sessions_makeup_of_session_id", "makeup_of_session_id"),
     )
+
+
+class GlobalEvent(Base):
+    __tablename__ = "global_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date_iso = Column(String, nullable=False)
+    mode = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    leave_reason = Column(String, nullable=True)
+    start = Column(String, nullable=True)
+    end = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('allDay', 'timeRange')",
+            name="ck_global_events_mode",
+        ),
+        Index("idx_global_events_date", "date_iso"),
+        Index("idx_global_events_mode", "mode"),
+        Index("idx_global_events_date_mode", "date_iso", "mode"),
+    )

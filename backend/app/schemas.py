@@ -9,6 +9,7 @@ DeactivateMode = Literal["immediate", "scheduled"]
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
 SessionStatus = Literal["pending", "present", "absent", "cancelled"]
 SessionKind = Literal["regular", "makeup", "extra"]
+GlobalEventMode = Literal["allDay", "timeRange"]
 
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -17,6 +18,13 @@ def _trim_name(value: str) -> str:
     trimmed = value.strip()
     if not trimmed:
         raise ValueError("name must not be empty")
+    return trimmed
+
+
+def _trim_label(value: str) -> str:
+    trimmed = value.strip()
+    if not trimmed:
+        raise ValueError("label must not be empty")
     return trimmed
 
 
@@ -230,5 +238,74 @@ class SessionRead(BaseModel):
     makeupOfDateISO: str | None
     makeupOfSessionId: int | None
     scheduleRuleId: int | None
+    createdAt: str = Field(description="ISO datetime")
+    updatedAt: str = Field(description="ISO datetime")
+
+
+class GlobalEventBase(BaseModel):
+    dateISO: str
+    mode: GlobalEventMode
+    label: str
+    leaveReason: str | None = None
+    start: str | None = None
+    end: str | None = None
+    note: str | None = None
+
+    @field_validator("dateISO")
+    @classmethod
+    def validate_date_iso(cls, value: str) -> str:
+        return _validate_required_date(value)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        return _trim_label(value)
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_hhmm_optional(cls, value: str | None) -> str | None:
+        return _validate_hhmm(value) if value is not None else value
+
+
+class GlobalEventCreate(GlobalEventBase):
+    pass
+
+
+class GlobalEventUpdate(BaseModel):
+    dateISO: str | None = None
+    mode: GlobalEventMode | None = None
+    label: str | None = None
+    leaveReason: str | None = None
+    start: str | None = None
+    end: str | None = None
+    note: str | None = None
+
+    @field_validator("dateISO")
+    @classmethod
+    def validate_date_iso(cls, value: str | None) -> str | None:
+        return _validate_required_date(value) if value is not None else value
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str | None) -> str | None:
+        return _trim_label(value) if value is not None else value
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_hhmm_optional(cls, value: str | None) -> str | None:
+        return _validate_hhmm(value) if value is not None else value
+
+
+class GlobalEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    dateISO: str
+    mode: str
+    label: str
+    leaveReason: str | None
+    start: str | None
+    end: str | None
+    note: str | None
     createdAt: str = Field(description="ISO datetime")
     updatedAt: str = Field(description="ISO datetime")

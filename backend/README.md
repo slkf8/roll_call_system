@@ -64,9 +64,15 @@ Implemented:
 - `POST /api/sessions`
 - `PATCH /api/sessions/{session_id}`
 - `DELETE /api/sessions/{session_id}` (detaches `makeupOfSessionId` on dependent sessions and returns `detachedMakeupCount`)
+- `GET /api/global-events?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `POST /api/global-events`
+- `PATCH /api/global-events/{event_id}`
+- `DELETE /api/global-events/{event_id}`
 
 Not implemented yet:
 
-- global events
 - statistics
 - Excel export
+- DataPage backend integration
+- Excel backend integration
+- frontend global events integration
