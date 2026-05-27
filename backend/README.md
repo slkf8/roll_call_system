@@ -29,6 +29,23 @@ API docs:
 http://127.0.0.1:8000/docs
 ```
 
+## Optional environment variables
+
+These let you override defaults without code changes (useful for packaged
+builds and CI):
+
+- `ROLL_CALL_DATA_DIR` — directory for the SQLite database. Defaults to
+  `backend/data/app.db` when running from source.
+- `ROLL_CALL_ALLOWED_ORIGINS` — comma-separated CORS origins. Defaults to
+  the Vite dev origins (`http://localhost:5173`, `http://127.0.0.1:5173`).
+- `ROLL_CALL_HOST` / `HOST` — bind host (default `127.0.0.1`). Currently
+  consumed by the config helper; the dev `uvicorn --reload` command still
+  uses uvicorn defaults.
+- `ROLL_CALL_PORT` / `PORT` — bind port (default `8000`). Invalid values
+  raise on startup; silent fallbacks would mask deployment mistakes.
+
+See `backend/.env.example` for a starter file.
+
 ## Test
 
 Run from this `backend/` directory:
