@@ -4,16 +4,28 @@ All helpers read environment variables on each call so tests can monkeypatch
 freely without import-order surprises. No caching.
 
 Optional environment variables:
-  ROLL_CALL_DATA_DIR         Directory for SQLite app.db (default: backend/data)
+  ROLL_CALL_DATA_DIR         Directory for SQLite app.db.
+                             Highest priority — overrides packaged/dev fallback.
+  ROLL_CALL_PACKAGED         Force packaged mode (1/true/yes) or source mode
+                             (0/false/no). When unset, falls back to
+                             sys.frozen (set by PyInstaller).
   ROLL_CALL_ALLOWED_ORIGINS  Comma-separated CORS origins
-                             (default: localhost:5173 + 127.0.0.1:5173)
-  ROLL_CALL_HOST / HOST      Bind host (default: 127.0.0.1)
-  ROLL_CALL_PORT / PORT      Bind port (default: 8000)
+                             (default: localhost:5173 + 127.0.0.1:5173).
+  ROLL_CALL_HOST / HOST      Bind host (default: 127.0.0.1).
+  ROLL_CALL_PORT / PORT      Bind port (default: 8000).
+
+Data directory resolution (highest priority first):
+  1. ROLL_CALL_DATA_DIR if set.
+  2. Packaged mode -> platformdirs.user_data_dir("RollCall", appauthor=False).
+  3. Dev source mode -> <repo>/backend/data.
 """
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+from platformdirs import user_data_dir
 
 
 _DEV_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -26,14 +38,51 @@ _DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8000
 
+_PACKAGED_APP_NAME = "RollCall"
+
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes"})
+_FALSY_ENV_VALUES = frozenset({"0", "false", "no"})
+
+
+def _is_packaged() -> bool:
+    """Detect whether the app is running as a packaged binary.
+
+    Precedence:
+      1. ROLL_CALL_PACKAGED env var. Accepts 1/true/yes (case-insensitive) for
+         packaged mode and 0/false/no for source mode. Any other non-empty
+         value raises ValueError to surface deployment misconfigurations.
+      2. PyInstaller's ``sys.frozen`` attribute when the env var is unset.
+    """
+    raw = os.getenv("ROLL_CALL_PACKAGED")
+    if raw is not None and raw != "":
+        normalized = raw.strip().lower()
+        if normalized in _TRUTHY_ENV_VALUES:
+            return True
+        if normalized in _FALSY_ENV_VALUES:
+            return False
+        raise ValueError(
+            f"Invalid ROLL_CALL_PACKAGED value: {raw!r}. "
+            "Use 1/true/yes or 0/false/no."
+        )
+    return getattr(sys, "frozen", False)
+
 
 def get_data_dir() -> Path:
     """Return the data directory, creating it if needed.
 
-    Honors ROLL_CALL_DATA_DIR. Falls back to <repo>/backend/data in dev mode.
+    Resolution order:
+      1. ROLL_CALL_DATA_DIR (always wins).
+      2. platformdirs.user_data_dir("RollCall") when packaged.
+      3. <repo>/backend/data in dev source mode.
     """
     raw = os.getenv("ROLL_CALL_DATA_DIR")
-    target = Path(raw).expanduser() if raw else _DEV_DATA_DIR
+    if raw:
+        target = Path(raw).expanduser()
+    elif _is_packaged():
+        target = Path(user_data_dir(_PACKAGED_APP_NAME, appauthor=False))
+    else:
+        target = _DEV_DATA_DIR
+
     target.mkdir(parents=True, exist_ok=True)
     return target
 

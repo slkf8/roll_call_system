@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from app import config
@@ -5,6 +7,8 @@ from app import config
 
 def test_get_data_dir_fallback_to_backend_data(monkeypatch):
     monkeypatch.delenv("ROLL_CALL_DATA_DIR", raising=False)
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
 
     path = config.get_data_dir()
 
@@ -16,6 +20,8 @@ def test_get_data_dir_fallback_to_backend_data(monkeypatch):
 def test_get_data_dir_with_env(monkeypatch, tmp_path):
     target = tmp_path / "custom-data"
     monkeypatch.setenv("ROLL_CALL_DATA_DIR", str(target))
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
 
     result = config.get_data_dir()
 
@@ -116,3 +122,78 @@ def test_get_port_out_of_range_raises(monkeypatch):
 
     with pytest.raises(ValueError):
         config.get_port()
+
+
+# ---------- packaged-mode detection ----------
+
+
+def test_is_packaged_defaults_to_false(monkeypatch):
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    assert config._is_packaged() is False
+
+
+def test_is_packaged_truthy_env_values(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    for value in ("1", "true", "TRUE", "yes", "YES", "True"):
+        monkeypatch.setenv("ROLL_CALL_PACKAGED", value)
+        assert config._is_packaged() is True, f"{value!r} should be packaged"
+
+
+def test_is_packaged_falsy_env_values(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for value in ("0", "false", "FALSE", "no", "NO", "False"):
+        monkeypatch.setenv("ROLL_CALL_PACKAGED", value)
+        assert config._is_packaged() is False, f"{value!r} should be source"
+
+
+def test_is_packaged_invalid_env_raises(monkeypatch):
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "maybe")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    with pytest.raises(ValueError):
+        config._is_packaged()
+
+
+def test_is_packaged_falls_back_to_sys_frozen(monkeypatch):
+    monkeypatch.delenv("ROLL_CALL_PACKAGED", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert config._is_packaged() is True
+
+
+def test_is_packaged_env_overrides_sys_frozen(monkeypatch):
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "0")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert config._is_packaged() is False
+
+
+# ---------- packaged-mode data dir ----------
+
+
+def test_get_data_dir_packaged_mode_uses_platformdirs(monkeypatch):
+    from platformdirs import user_data_dir
+
+    monkeypatch.delenv("ROLL_CALL_DATA_DIR", raising=False)
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    path = config.get_data_dir()
+    expected = user_data_dir("RollCall", appauthor=False)
+
+    assert str(path) == expected
+    assert path.exists()
+
+
+def test_get_data_dir_env_overrides_packaged_mode(monkeypatch, tmp_path):
+    target = tmp_path / "explicit-override"
+    monkeypatch.setenv("ROLL_CALL_DATA_DIR", str(target))
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    result = config.get_data_dir()
+
+    assert result == target
+    assert target.exists()

@@ -34,8 +34,11 @@ http://127.0.0.1:8000/docs
 These let you override defaults without code changes (useful for packaged
 builds and CI):
 
-- `ROLL_CALL_DATA_DIR` — directory for the SQLite database. Defaults to
-  `backend/data/app.db` when running from source.
+- `ROLL_CALL_DATA_DIR` — directory for the SQLite database. Highest
+  priority; overrides both packaged and dev defaults.
+- `ROLL_CALL_PACKAGED` — force packaged mode (`1` / `true` / `yes`) or
+  source mode (`0` / `false` / `no`). When unset, the app falls back to
+  `sys.frozen` (set automatically by PyInstaller). Invalid values raise.
 - `ROLL_CALL_ALLOWED_ORIGINS` — comma-separated CORS origins. Defaults to
   the Vite dev origins (`http://localhost:5173`, `http://127.0.0.1:5173`).
 - `ROLL_CALL_HOST` / `HOST` — bind host (default `127.0.0.1`). Currently
@@ -45,6 +48,41 @@ builds and CI):
   raise on startup; silent fallbacks would mask deployment mistakes.
 
 See `backend/.env.example` for a starter file.
+
+## Data location
+
+The SQLite database lives in a different directory depending on how the
+backend is launched:
+
+- **Dev source mode** (running `uvicorn app.main:app`): `backend/data/app.db`.
+- **Packaged mode** (PyInstaller binary, or `ROLL_CALL_PACKAGED=1`):
+  - macOS: `~/Library/Application Support/RollCall/app.db`
+  - Windows: `%LOCALAPPDATA%\RollCall\app.db`
+  - Linux: `~/.local/share/RollCall/app.db`
+- Either mode can be overridden by `ROLL_CALL_DATA_DIR=/your/path`.
+
+The app does **not** auto-migrate `backend/data/app.db` into the packaged
+location. If you need to move dev data into a packaged install, copy the
+file manually, e.g. on macOS:
+
+```bash
+mkdir -p "$HOME/Library/Application Support/RollCall"
+cp backend/data/app.db "$HOME/Library/Application Support/RollCall/app.db"
+```
+
+## Verified Python interpreter
+
+This backend is currently verified on **CPython 3.12.4** using the pinned
+versions in `requirements.txt`. The repo's `backend/.venv` directory may be
+out of sync with these requirements and is not used by the test suite.
+Recreate or update it as needed:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Test
 
