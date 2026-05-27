@@ -73,13 +73,13 @@ Implemented:
 Not implemented yet:
 
 - Excel export
-- DataPage backend integration
 - Excel backend integration
 - export endpoint
 
 Statistics scope:
 
 - Monthly statistics mirrors the current frontend DataPage counting rules.
+- Frontend DataPage statistics integration is complete; Excel template matching and export remain frontend-only.
 - It does not include Excel template matching.
 - It does not include Excel export.
 - It does not apply global event effective-status overrides.
