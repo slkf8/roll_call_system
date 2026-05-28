@@ -97,6 +97,57 @@ mkdir -p "$HOME/Library/Application Support/RollCall"
 cp backend/data/app.db "$HOME/Library/Application Support/RollCall/app.db"
 ```
 
+## PyInstaller PoC build
+
+Phase 4-5B-1 ships a `pyinstaller.spec` that bundles the backend + frontend
+into a single `--onedir` distribution. This is a proof-of-concept — not yet
+signed, notarized, or cross-platform.
+
+### One-time setup
+
+```bash
+python -m pip install pyinstaller     # dev-only, not in requirements.txt
+```
+
+### Build
+
+From the repo root:
+
+```bash
+./scripts/build_binary.sh
+```
+
+The script rebuilds the frontend, then runs
+`python -m PyInstaller backend/pyinstaller.spec --clean --noconfirm`. Output
+lands in:
+
+```text
+backend/dist/roll_call_backend/roll_call_backend
+```
+
+Both `backend/build/` and `backend/dist/` are gitignored.
+
+### Run the binary
+
+```bash
+./backend/dist/roll_call_backend/roll_call_backend
+# or with a custom port
+ROLL_CALL_PORT=8001 ./backend/dist/roll_call_backend/roll_call_backend
+```
+
+Then open `http://127.0.0.1:8000/` in a browser.
+
+### Notes
+
+- The packaged binary always runs in **packaged mode** (`sys.frozen=True`),
+  so the SQLite database is written to the user data dir (see *Data
+  location* above) — never to `backend/data/`.
+- macOS Gatekeeper will block the first launch ("cannot verify the
+  developer"). Right-click → Open the first time to allow it. Code signing
+  / notarization is a future phase.
+- Browser fallback (`xlsx-populate`) is irrelevant in packaged mode because
+  the bundled backend is always reachable from the bundled frontend.
+
 ## Verified Python interpreter
 
 This backend is currently verified on **CPython 3.12.4** using the pinned

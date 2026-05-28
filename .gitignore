@@ -32,6 +32,10 @@ dist/
 .vite/
 *.log
 
+# PyInstaller output
+backend/build/
+backend/dist/
+
 # 匯出物（通常是產出，不建議進版控）
 exports/*
 !exports/.gitkeep
