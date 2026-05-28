@@ -21,6 +21,7 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.venv-build/
 .envrc
 .pytest_cache/
 .mypy_cache/

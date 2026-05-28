@@ -117,12 +117,6 @@ Phase 4-5B-1 ships a `pyinstaller.spec` that bundles the backend + frontend
 into a single `--onedir` distribution. This is a proof-of-concept — not yet
 signed, notarized, or cross-platform.
 
-### One-time setup
-
-```bash
-python -m pip install pyinstaller     # dev-only, not in requirements.txt
-```
-
 ### Build
 
 From the repo root:
@@ -131,15 +125,34 @@ From the repo root:
 ./scripts/build_binary.sh
 ```
 
-The script rebuilds the frontend, then runs
-`python -m PyInstaller backend/pyinstaller.spec --clean --noconfirm`. Output
-lands in:
+The script:
 
-```text
-backend/dist/roll_call_backend/roll_call_backend
+1. Rebuilds the frontend (`npm run build`).
+2. Auto-creates `backend/.venv-build/` on first run with **only**
+   `backend/requirements.txt` + `pyinstaller` (no Anaconda noise). First-run
+   bootstrap takes ~30 seconds; later runs reuse the venv.
+3. Invokes PyInstaller from that clean venv to produce
+   `backend/dist/roll_call_backend/roll_call_backend`.
+
+Both `backend/build/`, `backend/dist/` and `backend/.venv-build/` are
+gitignored.
+
+### Clean venv rebuild / overrides
+
+Force the venv to be rebuilt (for example after `requirements.txt` changes):
+
+```bash
+rm -rf backend/.venv-build
+./scripts/build_binary.sh
 ```
 
-Both `backend/build/` and `backend/dist/` are gitignored.
+Build using a different Python (e.g. an existing Anaconda env) — the
+selected interpreter MUST already have PyInstaller installed; the script
+fails loudly otherwise instead of silently falling back:
+
+```bash
+PYTHON_BIN=/opt/anaconda3/bin/python ./scripts/build_binary.sh
+```
 
 ### Run the binary
 

@@ -5,9 +5,17 @@
 #   backend/dist/roll_call_backend/roll_call_backend
 #
 # Always re-builds the frontend so the bundled dist/ matches the current source.
-# PyInstaller is invoked via `python -m PyInstaller` to ensure the correct
-# Python environment is used (matches the one that holds fastapi / openpyxl
-# / sqlalchemy etc.).
+#
+# Build Python selection (highest priority first):
+#   1. $PYTHON_BIN — explicit override (e.g. PYTHON_BIN=/opt/anaconda3/bin/python).
+#      The selected Python MUST already have PyInstaller installed; the script
+#      will fail loudly rather than silently fall back.
+#   2. backend/.venv-build/bin/python — auto-created on first run with only the
+#      packages in backend/requirements.txt + pyinstaller. This keeps the
+#      bundle small and reproducible.
+#
+# To rebuild the clean venv from scratch (e.g. after requirements.txt changes):
+#   rm -rf backend/.venv-build && ./scripts/build_binary.sh
 
 set -euo pipefail
 
@@ -15,43 +23,67 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+CLEAN_VENV="$REPO_ROOT/backend/.venv-build"
+
 log() {
   echo ""
   echo "==> $*"
 }
 
-# 1. Confirm PyInstaller is importable in the active Python.
-log "Checking PyInstaller..."
-if ! python -m PyInstaller --version >/dev/null 2>&1; then
-  echo "ERROR: PyInstaller not installed in the active Python." >&2
-  echo "Install once with:" >&2
-  echo "  python -m pip install pyinstaller" >&2
-  exit 1
+# ---------- Select build Python ----------
+if [ -n "${PYTHON_BIN:-}" ]; then
+  PY="$PYTHON_BIN"
+  log "Using PYTHON_BIN override: $PY"
+  if ! "$PY" --version >/dev/null 2>&1; then
+    echo "ERROR: PYTHON_BIN=$PY is not executable or not a valid Python." >&2
+    exit 1
+  fi
+  if ! "$PY" -m PyInstaller --version >/dev/null 2>&1; then
+    echo "ERROR: PyInstaller not installed in $PY." >&2
+    echo "Install it there first, e.g.:" >&2
+    echo "  $PY -m pip install pyinstaller" >&2
+    exit 1
+  fi
+else
+  if [ ! -d "$CLEAN_VENV" ]; then
+    log "Bootstrapping clean build venv at $CLEAN_VENV..."
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "ERROR: python3 not found. Install Python 3.12+ from python.org or via Homebrew." >&2
+      exit 1
+    fi
+    python3 -m venv "$CLEAN_VENV"
+    "$CLEAN_VENV/bin/pip" install --quiet --upgrade pip
+    "$CLEAN_VENV/bin/pip" install --quiet -r "$REPO_ROOT/backend/requirements.txt"
+    "$CLEAN_VENV/bin/pip" install --quiet pyinstaller
+  fi
+  PY="$CLEAN_VENV/bin/python"
+  log "Using clean build venv: $PY"
 fi
-echo "PyInstaller $(python -m PyInstaller --version)"
 
-# 2. Confirm npm exists; rebuild the frontend so dist/ matches source.
+"$PY" --version
+"$PY" -m PyInstaller --version
+
+# ---------- Frontend build ----------
 log "Checking npm..."
 if ! command -v npm >/dev/null 2>&1; then
   echo "ERROR: npm not found. Install Node.js 24+ from nodejs.org." >&2
   exit 1
 fi
 
-if [ ! -d "frontend/node_modules" ]; then
+if [ ! -d "$REPO_ROOT/frontend/node_modules" ]; then
   log "Installing frontend dependencies..."
-  npm install --prefix frontend
+  npm install --prefix "$REPO_ROOT/frontend"
 fi
 
 log "Building frontend..."
-npm run build --prefix frontend
+npm run build --prefix "$REPO_ROOT/frontend"
 
-# 3. Run PyInstaller through the active Python's module entrypoint.
+# ---------- Backend binary ----------
 log "Building backend binary (PyInstaller --onedir)..."
-cd backend
-python -m PyInstaller pyinstaller.spec --clean --noconfirm
+cd "$REPO_ROOT/backend"
+"$PY" -m PyInstaller pyinstaller.spec --clean --noconfirm
 cd "$REPO_ROOT"
 
-# 4. Report output location.
 BINARY="backend/dist/roll_call_backend/roll_call_backend"
 if [ -x "$BINARY" ]; then
   log "Binary ready:"
