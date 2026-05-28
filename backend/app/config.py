@@ -18,7 +18,9 @@ Optional environment variables:
 
 Data directory resolution (highest priority first):
   1. ROLL_CALL_DATA_DIR if set.
-  2. Packaged mode -> platformdirs.user_data_dir("RollCall", appauthor=False).
+  2. Packaged mode -> Path(sys.executable).resolve().parent / "data".
+     The data folder sits next to the binary so the whole folder is portable
+     -- copy/move the bundle directory and the database goes with it.
   3. Dev source mode -> <repo>/backend/data.
 
 Frontend dist resolution (highest priority first):
@@ -32,8 +34,6 @@ import os
 import sys
 from pathlib import Path
 
-from platformdirs import user_data_dir
-
 
 _DEV_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -44,8 +44,6 @@ _DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8000
-
-_PACKAGED_APP_NAME = "RollCall"
 
 _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes"})
 _FALSY_ENV_VALUES = frozenset({"0", "false", "no"})
@@ -79,14 +77,16 @@ def get_data_dir() -> Path:
 
     Resolution order:
       1. ROLL_CALL_DATA_DIR (always wins).
-      2. platformdirs.user_data_dir("RollCall") when packaged.
+      2. Packaged mode: <executable's resolved parent>/data. The bundle is
+         portable -- moving the folder takes the database along. ``.resolve()``
+         follows symlinks so data tracks the real binary, not the link.
       3. <repo>/backend/data in dev source mode.
     """
     raw = os.getenv("ROLL_CALL_DATA_DIR")
     if raw:
         target = Path(raw).expanduser()
     elif _is_packaged():
-        target = Path(user_data_dir(_PACKAGED_APP_NAME, appauthor=False))
+        target = Path(sys.executable).resolve().parent / "data"
     else:
         target = _DEV_DATA_DIR
 

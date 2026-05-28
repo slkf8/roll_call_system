@@ -83,19 +83,33 @@ backend is launched:
 
 - **Dev source mode** (running `uvicorn app.main:app`): `backend/data/app.db`.
 - **Packaged mode** (PyInstaller binary, or `ROLL_CALL_PACKAGED=1`):
-  - macOS: `~/Library/Application Support/RollCall/app.db`
-  - Windows: `%LOCALAPPDATA%\RollCall\app.db`
-  - Linux: `~/.local/share/RollCall/app.db`
+  `data/app.db` **next to the executable**. For the default PoC build that
+  resolves to `backend/dist/roll_call_backend/data/app.db`. The whole
+  binary folder is **portable** — copy or move the folder anywhere, and the
+  database moves with it.
 - Either mode can be overridden by `ROLL_CALL_DATA_DIR=/your/path`.
 
-The app does **not** auto-migrate `backend/data/app.db` into the packaged
-location. If you need to move dev data into a packaged install, copy the
-file manually, e.g. on macOS:
+The app does **not** auto-migrate between locations. Manual moves you may
+need:
 
 ```bash
-mkdir -p "$HOME/Library/Application Support/RollCall"
-cp backend/data/app.db "$HOME/Library/Application Support/RollCall/app.db"
+# 1. Source dev DB -> packaged install (only if you want to seed the binary
+#    with your dev data).
+cp backend/data/app.db backend/dist/roll_call_backend/data/app.db
+
+# 2. Earlier user-data-dir builds (pre-4-5B-2A) wrote to ~/Library/...
+#    To recover that data into the new portable layout:
+cp "$HOME/Library/Application Support/RollCall/app.db" \
+   backend/dist/roll_call_backend/data/app.db
+
+# 3. Optional cleanup of the obsolete user data dir on macOS:
+rm "$HOME/Library/Application Support/RollCall/app.db"
+rmdir "$HOME/Library/Application Support/RollCall"   # if empty
 ```
+
+If the binary lives in a read-only location (e.g. mounted dmg), the data
+folder cannot be created next to it. Use
+`ROLL_CALL_DATA_DIR=/some/writable/path` to redirect.
 
 ## PyInstaller PoC build
 
@@ -140,8 +154,9 @@ Then open `http://127.0.0.1:8000/` in a browser.
 ### Notes
 
 - The packaged binary always runs in **packaged mode** (`sys.frozen=True`),
-  so the SQLite database is written to the user data dir (see *Data
-  location* above) — never to `backend/data/`.
+  so the SQLite database is written to `data/` next to the executable
+  (see *Data location* above) — never to `backend/data/`. The bundle is
+  portable: copy or move the binary folder, the database moves with it.
 - macOS Gatekeeper will block the first launch ("cannot verify the
   developer"). Right-click → Open the first time to allow it. Code signing
   / notarization is a future phase.

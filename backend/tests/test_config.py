@@ -173,30 +173,71 @@ def test_is_packaged_env_overrides_sys_frozen(monkeypatch):
 # ---------- packaged-mode data dir ----------
 
 
-def test_get_data_dir_packaged_mode_uses_platformdirs(monkeypatch):
-    from platformdirs import user_data_dir
+def test_get_data_dir_packaged_mode_uses_executable_neighbor(monkeypatch, tmp_path):
+    """Packaged mode places `data/` next to the executable for portability."""
+    fake_bin_dir = tmp_path / "bin"
+    fake_bin_dir.mkdir()
+    fake_exe = fake_bin_dir / "roll_call_backend"
+    fake_exe.write_text("")  # placeholder so resolve() works
 
     monkeypatch.delenv("ROLL_CALL_DATA_DIR", raising=False)
     monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
     monkeypatch.setattr(sys, "frozen", False, raising=False)
 
     path = config.get_data_dir()
-    expected = user_data_dir("RollCall", appauthor=False)
 
-    assert str(path) == expected
+    assert path == fake_bin_dir / "data"
+    assert path.exists()
+
+
+def test_get_data_dir_packaged_mode_resolves_symlink(monkeypatch, tmp_path):
+    """Symlinks resolve so the data folder follows the real binary location."""
+    real_bin_dir = tmp_path / "real_bundle"
+    real_bin_dir.mkdir()
+    real_exe = real_bin_dir / "roll_call_backend"
+    real_exe.write_text("")
+
+    link_dir = tmp_path / "linked"
+    link_dir.mkdir()
+    link_exe = link_dir / "roll_call_backend"
+    try:
+        link_exe.symlink_to(real_exe)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this filesystem")
+
+    monkeypatch.delenv("ROLL_CALL_DATA_DIR", raising=False)
+    monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "executable", str(link_exe))
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    path = config.get_data_dir()
+
+    # .resolve() follows the symlink -> data sits beside the real binary.
+    assert path == real_bin_dir / "data"
     assert path.exists()
 
 
 def test_get_data_dir_env_overrides_packaged_mode(monkeypatch, tmp_path):
+    """ROLL_CALL_DATA_DIR wins over the executable-neighbor default."""
     target = tmp_path / "explicit-override"
+
+    fake_bin_dir = tmp_path / "bin"
+    fake_bin_dir.mkdir()
+    fake_exe = fake_bin_dir / "roll_call_backend"
+    fake_exe.write_text("")
+
     monkeypatch.setenv("ROLL_CALL_DATA_DIR", str(target))
     monkeypatch.setenv("ROLL_CALL_PACKAGED", "1")
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
     monkeypatch.setattr(sys, "frozen", True, raising=False)
 
     result = config.get_data_dir()
 
     assert result == target
     assert target.exists()
+    # The packaged-default folder must NOT have been created when env wins.
+    assert not (fake_bin_dir / "data").exists()
 
 
 # ---------- frontend dist resolution ----------

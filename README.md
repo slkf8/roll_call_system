@@ -105,7 +105,7 @@ cd frontend && npm run dev
 | 模式 | SQLite 路徑 |
 |---|---|
 | Source mode（目前一鍵啟動） | `backend/data/app.db` |
-| 未來 PyInstaller 打包版 | macOS：`~/Library/Application Support/RollCall/app.db`<br>Windows：`%LOCALAPPDATA%\RollCall\app.db`<br>Linux：`~/.local/share/RollCall/app.db` |
+| PyInstaller 打包版 | `<binary 同層目錄>/data/app.db`（**可攜帶**：搬移整個 binary 資料夾、資料同步搬） |
 | 自訂位置 | 任何模式都可 `ROLL_CALL_DATA_DIR=/your/path` 覆蓋 |
 
 詳細環境變數（`ROLL_CALL_PACKAGED` / `ROLL_CALL_ALLOWED_ORIGINS` / `ROLL_CALL_HOST` 等）見 [backend/README.md](backend/README.md)。

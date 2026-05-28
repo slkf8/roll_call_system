@@ -12,10 +12,9 @@
 #     resolved at runtime by app.config.get_frontend_dist_dir().
 #
 # Runtime data directory (NOT inside the bundle):
-#   Resolved by app.config.get_data_dir() via platformdirs:
-#     macOS:  ~/Library/Application Support/RollCall/app.db
-#     Linux:  ~/.local/share/RollCall/app.db
-#     Win:    %LOCALAPPDATA%/RollCall/app.db
+#   Resolved by app.config.get_data_dir() to the binary's neighbor:
+#     <binary-folder>/data/app.db
+#   The whole folder is portable; move it and the database goes too.
 #   Override with ROLL_CALL_DATA_DIR=/your/path.
 # pylint: disable=undefined-variable
 
