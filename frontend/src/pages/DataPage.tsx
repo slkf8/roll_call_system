@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import * as XLSX from "xlsx";
 import { fillExcelTemplate } from "../api/exportsApi";
@@ -161,6 +161,57 @@ function formatStatus(status: StudentProfile["status"]) {
   if (status === "active") return "啟用中";
   if (status === "scheduled_deactivation") return "已設定停用";
   return "已停用";
+}
+
+function formatSessionStatusLabel(status: Session["status"]) {
+  if (status === "present") return "已出席";
+  if (status === "absent") return "缺席";
+  if (status === "pending") return "待處理";
+  if (status === "cancelled") return "已取消";
+  return status;
+}
+
+// Tailwind 安全色票（iOS-style 軟色 + ring），不引入新 theme tokens。
+function getSessionStatusBadgeClass(
+  status: Session["status"],
+  isDark: boolean
+) {
+  if (status === "present") {
+    return isDark
+      ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25"
+      : "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20";
+  }
+  if (status === "absent") {
+    return isDark
+      ? "bg-red-500/15 text-red-300 ring-1 ring-red-500/25"
+      : "bg-red-500/10 text-red-700 ring-1 ring-red-500/20";
+  }
+  if (status === "pending") {
+    return isDark
+      ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/25"
+      : "bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20";
+  }
+  // cancelled
+  return isDark
+    ? "bg-white/5 text-[#8E8E93] ring-1 ring-white/10"
+    : "bg-slate-200/60 text-slate-500 ring-1 ring-slate-300/60";
+}
+
+function getSessionKindBadgeClass(kind: Session["kind"], isDark: boolean) {
+  if (kind === "regular") {
+    return isDark
+      ? "bg-[#0A84FF]/16 text-[#4DA3FF] ring-1 ring-[#0A84FF]/25"
+      : "bg-[#007AFF]/10 text-[#007AFF] ring-1 ring-[#007AFF]/15";
+  }
+  if (kind === "makeup") {
+    return isDark
+      ? "bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25"
+      : "bg-violet-500/10 text-violet-700 ring-1 ring-violet-500/20";
+  }
+  // extra
+  return isDark
+    ? "bg-teal-500/15 text-teal-300 ring-1 ring-teal-500/25"
+    : "bg-teal-500/10 text-teal-700 ring-1 ring-teal-500/20";
 }
 
 function sortStudents(a: StudentProfile, b: StudentProfile) {
@@ -584,6 +635,49 @@ export default function DataPage({
     () => sessions.filter((session) => isInRange(session.dateISO, monthRange)),
     [sessions, monthRange]
   );
+
+  // 每學生明細展開狀態（in-memory，不持久化；月份切換時清空）。
+  const [expandedStudentIds, setExpandedStudentIds] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  useEffect(() => {
+    setExpandedStudentIds(new Set());
+  }, [monthToken]);
+
+  function toggleStudentExpanded(studentId: number) {
+    setExpandedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  }
+
+  // 預先按 studentId 分組並依日期 + 開始時間升序排序，
+  // 展開時直接 .get(studentId) 即可，避免每次展開都重算。
+  const sessionsByStudentId = useMemo(() => {
+    const map = new Map<number, Session[]>();
+    for (const session of monthlySessions) {
+      if (session.studentId == null) continue;
+      const list = map.get(session.studentId);
+      if (list) {
+        list.push(session);
+      } else {
+        map.set(session.studentId, [session]);
+      }
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          a.dateISO.localeCompare(b.dateISO) || a.start.localeCompare(b.start)
+      );
+    }
+    return map;
+  }, [monthlySessions]);
 
   const localAttendanceRows = useMemo<StudentAttendanceRow[]>(() => {
     return [...students].sort(sortStudents).map((student) => {
@@ -1061,34 +1155,133 @@ export default function DataPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {displayAttendanceRows.map((row) => (
-                      <tr key={row.student.id}>
-                        <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
-                          {row.student.name}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
-                          {row.student.birthday || "-"}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
-                          {row.student.school || "-"}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                          {formatStatus(row.student.status)}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                          {row.regularPresentCount}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                          {row.makeupPresentCount}
-                        </td>
-                        <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                          {row.extraPresentCount}
-                        </td>
-                        <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
-                          {row.totalPresentCount}
-                        </td>
-                      </tr>
-                    ))}
+                    {displayAttendanceRows.map((row) => {
+                      const expanded = expandedStudentIds.has(row.student.id);
+                      const detailSessions =
+                        sessionsByStudentId.get(row.student.id) ?? [];
+                      const detailRowId = `student-detail-${row.student.id}`;
+                      const hoverRowClass = isDark
+                        ? "cursor-pointer hover:bg-white/[0.04]"
+                        : "cursor-pointer hover:bg-black/[0.03]";
+                      return (
+                        <Fragment key={row.student.id}>
+                          <tr
+                            onClick={() => toggleStudentExpanded(row.student.id)}
+                            aria-expanded={expanded}
+                            aria-controls={detailRowId}
+                            className={hoverRowClass}
+                          >
+                            <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
+                              <span className="inline-flex items-center gap-1">
+                                <span
+                                  aria-hidden="true"
+                                  className={`text-[12px] ${mutedTextClass}`}
+                                >
+                                  {expanded ? "▴" : "▾"}
+                                </span>
+                                {row.student.name}
+                              </span>
+                            </td>
+                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                              {row.student.birthday || "-"}
+                            </td>
+                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                              {row.student.school || "-"}
+                            </td>
+                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                              {formatStatus(row.student.status)}
+                            </td>
+                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                              {row.regularPresentCount}
+                            </td>
+                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                              {row.makeupPresentCount}
+                            </td>
+                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                              {row.extraPresentCount}
+                            </td>
+                            <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
+                              {row.totalPresentCount}
+                            </td>
+                          </tr>
+                          {expanded ? (
+                            <tr id={detailRowId}>
+                              <td
+                                colSpan={8}
+                                className={`border-b px-3 py-4 ${tableCellClass} ${
+                                  isDark ? "bg-[#161618]" : "bg-[#FAFAFB]"
+                                }`}
+                              >
+                                <div className={`text-[13px] font-semibold`}>
+                                  本月課次紀錄（共 {detailSessions.length} 筆，含待處理 / 已取消）
+                                </div>
+                                {detailSessions.length === 0 ? (
+                                  <div
+                                    className={`mt-2 text-[13px] ${mutedTextClass}`}
+                                  >
+                                    本月無課次紀錄。
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 overflow-x-auto">
+                                    <table className="min-w-full border-separate border-spacing-0 text-left text-[12.5px]">
+                                      <thead>
+                                        <tr>
+                                          {["日期", "開始時間", "時長", "kind", "status"].map(
+                                            (label) => (
+                                              <th
+                                                key={label}
+                                                className={`border-b px-3 py-2 font-semibold ${tableHeadClass}`}
+                                              >
+                                                {label}
+                                              </th>
+                                            )
+                                          )}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {detailSessions.map((session) => (
+                                          <tr key={session.id}>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              {session.dateISO}
+                                            </td>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              {session.start}
+                                            </td>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              {session.durationMin} 分鐘
+                                            </td>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              <span
+                                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getSessionKindBadgeClass(
+                                                  session.kind,
+                                                  isDark
+                                                )}`}
+                                              >
+                                                {session.kind}
+                                              </span>
+                                            </td>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              <span
+                                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getSessionStatusBadgeClass(
+                                                  session.status,
+                                                  isDark
+                                                )}`}
+                                              >
+                                                {formatSessionStatusLabel(session.status)}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

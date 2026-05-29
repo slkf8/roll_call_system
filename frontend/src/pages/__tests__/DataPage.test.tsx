@@ -819,4 +819,151 @@ describe("DataPage", () => {
     expect(optionTexts.some((text) => text.includes("直接服務"))).toBe(true);
     expect(optionTexts.some((text) => text.includes("11月"))).toBe(true);
   });
+
+  // ------------------------------------------------------------
+  // Phase 4-6B：每學生統計明細展開
+  // ------------------------------------------------------------
+
+  it("collapses every per-student session detail by default", () => {
+    renderDataPage();
+
+    // 「本月課次紀錄」標題只會在展開時出現。
+    expect(screen.queryByText(/本月課次紀錄/)).not.toBeInTheDocument();
+    // 既有 row 仍存在。
+    const section = getSectionByHeading("每學生出席次數");
+    expect(within(section).getByText("陳小明")).toBeInTheDocument();
+    // 預設 row 標 aria-expanded=false
+    const chenRow = getRowByCell(section, "陳小明");
+    expect(chenRow.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("expands a student row to show this month's session detail (sorted by date+start)", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+    const chenRow = getRowByCell(section, "陳小明");
+
+    await user.click(chenRow);
+
+    // 標題與筆數出現（含待處理 / 已取消的提示語）。
+    const headings = screen.getAllByText(/本月課次紀錄（共 5 筆，含待處理 \/ 已取消）/);
+    expect(headings.length).toBeGreaterThan(0);
+
+    // 明細表頭存在。
+    expect(screen.getAllByText("日期").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("開始時間").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("時長").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("kind").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("status").length).toBeGreaterThan(0);
+
+    // 5 個明細日期都在表中。
+    for (const dateISO of [
+      "2026-11-01",
+      "2026-11-08",
+      "2026-11-15",
+      "2026-11-22",
+      "2026-11-29",
+    ]) {
+      expect(screen.getAllByText(dateISO).length).toBeGreaterThan(0);
+    }
+    // 10 月的紀錄不顯示。
+    expect(screen.queryByText("2026-10-25")).not.toBeInTheDocument();
+
+    // 排序由 dateISO + start 升序：第一筆日期應為 2026-11-01。
+    const dateCells = screen.getAllByText(/^2026-11-\d{2}$/);
+    expect(dateCells[0].textContent).toBe("2026-11-01");
+  });
+
+  it("re-collapses the detail when the same row is clicked again", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+    const chenRow = getRowByCell(section, "陳小明");
+
+    await user.click(chenRow);
+    expect(screen.queryByText(/本月課次紀錄/)).toBeInTheDocument();
+
+    await user.click(chenRow);
+    expect(screen.queryByText(/本月課次紀錄/)).not.toBeInTheDocument();
+    expect(chenRow.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("shows Chinese status labels and English kind labels in the detail badges", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+
+    // 陳小明 5 筆 = present(3) absent(1) + kinds regular(3) makeup(1) extra(1)
+    expect(screen.getAllByText("已出席").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText("缺席").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("regular").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("makeup").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("extra").length).toBeGreaterThanOrEqual(1);
+
+    // 李小欣 有 1 個 pending — 展開後檢查。
+    await user.click(getRowByCell(section, "李小欣"));
+    expect(screen.getAllByText("待處理").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows an empty-state message when an expanded student has no monthly sessions", async () => {
+    const studentsOnly: StudentProfile[] = [
+      {
+        id: 999,
+        name: "孤兒學生",
+        birthday: "2010-01-01",
+        school: "無課學校",
+        status: "active",
+      },
+    ];
+    const { user } = renderDataPage({ initialStudents: studentsOnly, initialSessions: [] });
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "孤兒學生"));
+
+    expect(
+      screen.getByText(/本月課次紀錄（共 0 筆，含待處理 \/ 已取消）/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("本月無課次紀錄。")).toBeInTheDocument();
+  });
+
+  it("collapses all expanded rows when the selected month changes", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+    expect(screen.queryByText(/本月課次紀錄/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /上一個月/ }));
+
+    // 切月後展開狀態被清空 — 即使新月份仍有對應 row，也不應有 detail。
+    expect(screen.queryByText(/本月課次紀錄/)).not.toBeInTheDocument();
+  });
+
+  it("expands multiple student rows independently", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+    await user.click(getRowByCell(section, "李小欣"));
+
+    // 兩個學生明細應同時可見。
+    expect(
+      screen.getByText(/本月課次紀錄（共 5 筆，含待處理 \/ 已取消）/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/本月課次紀錄（共 2 筆，含待處理 \/ 已取消）/)
+    ).toBeInTheDocument();
+  });
+
+  it("does not render any interactive edit/delete control in the detail panel (read-only)", async () => {
+    const { user } = renderDataPage();
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+
+    // 明細區唯讀：沒有編輯 / 刪除 / 點名 / 跳轉按鈕。
+    expect(screen.queryByRole("button", { name: "編輯" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刪除" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /點名/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
 });
