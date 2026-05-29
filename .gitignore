@@ -37,6 +37,9 @@ dist/
 backend/build/
 backend/dist/
 
+# Portable release folder (produced by scripts/package_release.sh)
+release/
+
 # 匯出物（通常是產出，不建議進版控）
 exports/*
 !exports/.gitkeep
