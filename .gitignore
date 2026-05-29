@@ -44,6 +44,11 @@ release/
 exports/*
 !exports/.gitkeep
 
+# Excel 檔案不進版控（避免散佈真實官方模板或內含真實學生資料）
+*.xlsx
+*.xls
+*.xlsm
+
 # DB（若你之後用 SQLite）
 *.sqlite
 *.sqlite3

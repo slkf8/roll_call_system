@@ -3,7 +3,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { readFileSync } from "node:fs";
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -290,14 +289,69 @@ function workbookToFile(workbook: XLSX.WorkBook, filename: string) {
   return new File([output], filename, { type: xlsxMime });
 }
 
-function loadFixtureWorkbook() {
-  const fixturePath = "src/pages/__tests__/fixtures/official-template.xlsx";
-  const buffer = readFileSync(fixturePath);
-  return XLSX.read(buffer, { type: "buffer", cellDates: true });
+// Replacement for the previous on-disk official-template.xlsx fixture.
+// Builds a multi-month synthetic workbook (9月 / 10月 / 11月) that mirrors
+// the real official monthly statistics template shape -- 3-row hierarchical
+// header with merged month sections, three subgroups (個別 / 2人小組 /
+// 3人小組) each with 直接服務 + 視像 leaves, plus a 備註 column. No real
+// student data is included; the few visible names match other synthetic
+// fixtures already in this file.
+function createOfficialLikeTemplateWorkbook() {
+  const worksheet: XLSX.WorkSheet = {};
+
+  const colAt = (start: string, offset: number) =>
+    XLSX.utils.encode_col(XLSX.utils.decode_col(start) + offset);
+
+  const months: Array<{ label: string; startCol: string; endCol: string }> = [
+    { label: "9月各情況次數", startCol: "P", endCol: "V" },
+    { label: "10月各情況次數", startCol: "W", endCol: "AC" },
+    { label: "11月各情況次數", startCol: "AD", endCol: "AJ" },
+  ];
+
+  for (const m of months) {
+    setCell(worksheet, `${m.startCol}1`, m.label);
+    // Row 2 -- subgroups (each subgroup spans 2 leaf columns; +1 備註)
+    setCell(worksheet, `${colAt(m.startCol, 0)}2`, "個別");
+    setCell(worksheet, `${colAt(m.startCol, 2)}2`, "2人小組");
+    setCell(worksheet, `${colAt(m.startCol, 4)}2`, "3人小組");
+    setCell(worksheet, `${colAt(m.startCol, 6)}2`, "備註");
+    // Row 3 -- leaf labels (3 pairs of 直接服務 + 視像-style note)
+    for (let i = 0; i < 6; i += 2) {
+      setCell(worksheet, `${colAt(m.startCol, i)}3`, "直接服務");
+      setCell(
+        worksheet,
+        `${colAt(m.startCol, i + 1)}3`,
+        "視像或配合圖文資料提供諮詢/建議原因"
+      );
+    }
+  }
+
+  // Entity-level leaf labels (row 3, same convention as the basic synthetic).
+  setCell(worksheet, "C3", "姓名");
+  setCell(worksheet, "E3", "出生日期");
+
+  // Synthetic student rows (names match other fixtures in this file).
+  setCell(worksheet, "C6", "陳小明");
+  setCell(worksheet, "E6", "08/03/2012");
+  setCell(worksheet, "C7", "李小欣");
+  setCell(worksheet, "E7", "2011-11-21");
+  setCell(worksheet, "C8", "王家朗");
+  setCell(worksheet, "E8", dateToExcelSerial("2012-03-08"));
+
+  worksheet["!ref"] = "A1:AJ8";
+  worksheet["!merges"] = months.map((m) =>
+    XLSX.utils.decode_range(`${m.startCol}1:${m.endCol}1`)
+  );
+
+  return {
+    SheetNames: ["Sheet1"],
+    Sheets: { Sheet1: worksheet },
+  } satisfies XLSX.WorkBook;
 }
 
-function fixtureWorkbookToFile() {
-  return workbookToFile(loadFixtureWorkbook(), "official-template.xlsx");
+function officialLikeWorkbookToFile() {
+  // Keep the original filename so the UI assertion below still matches.
+  return workbookToFile(createOfficialLikeTemplateWorkbook(), "official-template.xlsx");
 }
 
 async function uploadTemplate(
@@ -804,10 +858,10 @@ describe("DataPage", () => {
     expect(screen.getByRole("button", { name: "匯出並填入官方模板" })).toBeDisabled();
   });
 
-  it("reads the real official template fixture and produces direct-service candidates", async () => {
+  it("reads an official-style multi-month synthetic workbook and produces direct-service candidates", async () => {
     const { user, container } = renderDataPage();
 
-    await uploadTemplate(user, container, fixtureWorkbookToFile());
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
 
     expect(screen.getByText("目前模板：official-template.xlsx")).toBeInTheDocument();
     expect(getSelect("工作表").value).toBeTruthy();
