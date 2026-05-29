@@ -127,6 +127,47 @@ function isWithinMonthRemaining(dateISO: string, anchorISO: string) {
   return dateISO.startsWith(monthPrefix) && dateISO >= anchorISO && dateISO <= endISO;
 }
 
+function getMonthStartISO(anchorISO: string) {
+  const [year, month] = anchorISO.split("-").map((item) => Number(item));
+  if (!year || !month) return "";
+  return `${year}-${pad2(month)}-01`;
+}
+
+function getMonthEndISO(anchorISO: string) {
+  const [year, month] = anchorISO.split("-").map((item) => Number(item));
+  if (!year || !month) return "";
+  // Day 0 of next month = last day of this month.
+  const end = new Date(year, month, 0);
+  if (Number.isNaN(end.getTime())) return "";
+  return formatDateISO(end);
+}
+
+function getDatesInRange(fromISO: string, toISO: string) {
+  const [fy, fm, fd] = fromISO.split("-").map((item) => Number(item));
+  const [ty, tm, td] = toISO.split("-").map((item) => Number(item));
+  if (!fy || !fm || !fd || !ty || !tm || !td) return [];
+
+  const cursor = new Date(fy, fm - 1, fd);
+  const stop = new Date(ty, tm - 1, td);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(stop.getTime())) return [];
+  if (cursor.getTime() > stop.getTime()) return [];
+
+  const dates: Array<{ date: Date; dateISO: string }> = [];
+  while (cursor.getTime() <= stop.getTime()) {
+    dates.push({
+      date: new Date(cursor),
+      dateISO: formatDateISO(cursor),
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function isSameMonth(aISO: string, bISO: string) {
+  return aISO.slice(0, 7) === bISO.slice(0, 7);
+}
+
 function formatWeekdayLabel(weekday: StudentScheduleRule["weekday"]) {
   const labels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"] as const;
   return labels[weekday];
@@ -271,6 +312,18 @@ export default function StudentsPage({
   const [ruleDraft, setRuleDraft] = useState<RuleDraft>(createDefaultRuleDraft());
   const [ruleDeleteTarget, setRuleDeleteTarget] = useState<StudentScheduleRule | null>(null);
   const [ruleDeleteOpen, setRuleDeleteOpen] = useState(false);
+
+  // 固定課表收起/展開（in-memory，不持久化；換 tab/重整即還原為全部收起）
+  const [expandedScheduleStudentIds, setExpandedScheduleStudentIds] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  // 批量生成 regular 課次
+  const [batchSheetOpen, setBatchSheetOpen] = useState(false);
+  const [batchFromDate, setBatchFromDate] = useState("");
+  const [batchToDate, setBatchToDate] = useState("");
+  const [batchDateError, setBatchDateError] = useState("");
+  const [batchRunning, setBatchRunning] = useState(false);
 
   const todayStr = todayISO();
 
@@ -426,13 +479,16 @@ export default function StudentsPage({
       .sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start));
   }
 
-  function buildRegularSessionsForStudent(
+  // 核心生成器：以「日期列表」為輸入，dedup key =
+  //   `${studentId}|${dateISO}|${start}|regular`
+  // 單一學生「本月剩餘」與批量「自訂月內範圍」皆透過此函式產生課次，
+  // 避免兩套生成邏輯分叉。
+  function buildRegularSessionsInDates(
     student: StudentProfile,
     activeRules: StudentScheduleRule[],
     baseSessions: Session[],
-    anchorISO: string
+    dates: Array<{ date: Date; dateISO: string }>
   ) {
-    const dates = getMonthRemainingDates(anchorISO);
     const existingRegularKeys = new Set(
       baseSessions
         .filter((session) => session.kind === "regular")
@@ -478,6 +534,21 @@ export default function StudentsPage({
       generatedSessions,
       skippedCount,
     };
+  }
+
+  // 單一學生「本月剩餘」用的薄包裝，保留原 API 與行為不變。
+  function buildRegularSessionsForStudent(
+    student: StudentProfile,
+    activeRules: StudentScheduleRule[],
+    baseSessions: Session[],
+    anchorISO: string
+  ) {
+    return buildRegularSessionsInDates(
+      student,
+      activeRules,
+      baseSessions,
+      getMonthRemainingDates(anchorISO)
+    );
   }
 
   async function generateRegularSessionsForStudent(student: StudentProfile) {
@@ -700,6 +771,162 @@ export default function StudentsPage({
     }
 
     setToast?.(`已重新生成 ${generatedSessions.length} 堂 regular 課次`);
+  }
+
+  function toggleScheduleExpanded(studentId: number) {
+    setExpandedScheduleStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  }
+
+  function openBatchSheet() {
+    const anchor = selectedDate || todayStr;
+    setBatchFromDate(getMonthStartISO(anchor));
+    setBatchToDate(getMonthEndISO(anchor));
+    setBatchDateError("");
+    setBatchRunning(false);
+    setBatchSheetOpen(true);
+  }
+
+  function closeBatchSheet() {
+    setBatchSheetOpen(false);
+    setBatchDateError("");
+    setBatchRunning(false);
+  }
+
+  async function runBatchGenerateRegular() {
+    if (!selectedDate) {
+      setToast?.("缺少月份資訊，無法批量生成 regular 課次");
+      return;
+    }
+    if (!setSessions) {
+      setToast?.("缺少課次資料，無法批量生成 regular 課次");
+      return;
+    }
+    if (!batchFromDate || !batchToDate) {
+      setBatchDateError("請選擇開始與結束日期");
+      return;
+    }
+    if (batchFromDate > batchToDate) {
+      setBatchDateError("結束日期需晚於或等於開始日期");
+      return;
+    }
+    // 兩端日期皆必須位於 selectedDate 所在月份。
+    if (
+      !isSameMonth(batchFromDate, selectedDate) ||
+      !isSameMonth(batchToDate, selectedDate)
+    ) {
+      setBatchDateError("請選擇本月範圍內的日期");
+      return;
+    }
+
+    setBatchRunning(true);
+
+    const activeStudents = safeStudents.filter((student) => student.status === "active");
+    if (activeStudents.length === 0) {
+      setToast?.("沒有可批量生成的啟用中學生");
+      closeBatchSheet();
+      return;
+    }
+
+    const candidates: Array<{ student: StudentProfile; rules: StudentScheduleRule[] }> = [];
+    let noRuleStudentCount = 0;
+    for (const student of activeStudents) {
+      const rules = safeRules.filter(
+        (rule) => rule.studentId === student.id && rule.isActive
+      );
+      if (rules.length === 0) {
+        noRuleStudentCount++;
+      } else {
+        candidates.push({ student, rules });
+      }
+    }
+
+    const dates = getDatesInRange(batchFromDate, batchToDate);
+
+    // 逐學生累積 generated 進 runningBaseSessions，
+    // 讓下一位學生在 dedup 與 nextId 計算時都看到本輪同批產出。
+    let runningBaseSessions: Session[] = sessions ? [...sessions] : [];
+    const allGenerated: RegularSessionCandidate[] = [];
+    let totalSkipped = 0;
+    for (const { student, rules } of candidates) {
+      const { generatedSessions, skippedCount } = buildRegularSessionsInDates(
+        student,
+        rules,
+        runningBaseSessions,
+        dates
+      );
+      allGenerated.push(...generatedSessions);
+      totalSkipped += skippedCount;
+      runningBaseSessions = [
+        ...runningBaseSessions,
+        ...generatedSessions.map((item) => item.session),
+      ];
+    }
+
+    function buildToast(generatedCount: number) {
+      const parts: string[] = [];
+      if (generatedCount === 0) {
+        parts.push("範圍內沒有可新增的 regular 課次");
+      } else {
+        parts.push(`已批量生成 ${generatedCount} 堂 regular 課次`);
+      }
+      if (totalSkipped > 0) {
+        parts.push(`略過 ${totalSkipped} 堂已存在課次`);
+      }
+      if (noRuleStudentCount > 0) {
+        parts.push(`${noRuleStudentCount} 位學生沒有固定課表`);
+      }
+      return parts.join("，");
+    }
+
+    if (allGenerated.length === 0) {
+      setToast?.(buildToast(0));
+      closeBatchSheet();
+      return;
+    }
+
+    if (isSessionsBackendAvailable) {
+      try {
+        const createdSessions = await Promise.all(
+          allGenerated.map(({ session, scheduleRuleId }) =>
+            createSession({
+              studentId: session.studentId!,
+              dateISO: session.dateISO,
+              start: session.start,
+              durationMin: session.durationMin,
+              status: "pending",
+              reason: null,
+              note: null,
+              kind: "regular",
+              makeupOfDateISO: null,
+              makeupOfSessionId: null,
+              scheduleRuleId,
+            })
+          )
+        );
+        setSessions((current) => [...current, ...createdSessions]);
+      } catch (error) {
+        console.warn("Batch generate regular sessions failed", error);
+        setToast?.("批量生成 regular 失敗，請確認後端是否正常");
+        setBatchRunning(false);
+        return;
+      }
+    } else {
+      setSessions((current) => [
+        ...current,
+        ...allGenerated.map(({ session }) => session),
+      ]);
+    }
+
+    setToast?.(buildToast(allGenerated.length));
+    closeBatchSheet();
   }
 
   function closeRuleEditor() {
@@ -1286,6 +1513,29 @@ export default function StudentsPage({
             ))}
           </div>
 
+          {safeStudents.length > 0 ? (
+            <div className={cardClass}>
+              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold">批量操作</div>
+                  <div className="mt-1 text-[13px] leading-5 text-[#8E8E93]">
+                    對「啟用中且有固定課表」的學生在指定日期範圍內生成 regular 課次，
+                    重複的時段會自動略過。
+                  </div>
+                </div>
+                <div className="sm:flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={openBatchSheet}
+                    className={primaryButtonClass}
+                  >
+                    批量生成本月 regular
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="space-y-3">
             {safeStudents.length === 0 ? (
               <div className={cardClass}>
@@ -1378,52 +1628,81 @@ export default function StudentsPage({
                       isDark ? "border-white/10" : "border-[#E5E5EA]"
                     )}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[13px] font-medium text-[#8E8E93]">固定課表</div>
-                        <div className="mt-1 text-[13px] text-[#8E8E93]">
-                          共 {getRulesForStudent(student.id).length} 條規則
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => generateRegularSessionsForStudent(student)}
-                          className={compactButtonClass}
-                        >
-                          生成本月 regular 課次
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => clearRemainingRegularSessionsForStudent(student)}
-                          className={compactDangerButtonClass}
-                        >
-                          清除本月 regular
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => regenerateRegularSessionsForStudent(student)}
-                          className={compactButtonClass}
-                        >
-                          重新生成本月 regular
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openRuleCreateSheet(student)}
-                          className={compactButtonClass}
-                        >
-                          新增固定課表
-                        </button>
-                      </div>
-                    </div>
+                    {(() => {
+                      const expanded = expandedScheduleStudentIds.has(student.id);
+                      const ruleCount = getRulesForStudent(student.id).length;
+                      const sectionId = `student-schedule-${student.id}`;
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleScheduleExpanded(student.id)}
+                            aria-expanded={expanded}
+                            aria-controls={sectionId}
+                            aria-label={expanded ? "收起固定課表" : "展開固定課表"}
+                            className={cx(
+                              "flex w-full items-center justify-between gap-3 rounded-2xl px-2 py-2 text-left transition",
+                              isDark ? "hover:bg-white/5" : "hover:bg-black/[0.03]"
+                            )}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-medium text-[#8E8E93]">
+                                固定課表
+                              </div>
+                              <div className="mt-1 text-[13px] text-[#8E8E93]">
+                                共 {ruleCount} 條規則
+                              </div>
+                            </div>
+                            <div
+                              aria-hidden="true"
+                              className="text-[14px] text-[#8E8E93]"
+                            >
+                              {expanded ? "▴" : "▾"}
+                            </div>
+                          </button>
 
-                    {getRulesForStudent(student.id).length === 0 ? (
-                      <div className="mt-4 text-[13px] leading-6 text-[#8E8E93]">
-                        尚未設定固定課表規則。
-                      </div>
-                    ) : (
-                      <div className="mt-4 space-y-3">
-                        {getRulesForStudent(student.id).map((rule) => (
+                          {expanded ? (
+                            <div id={sectionId} className="mt-3">
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => generateRegularSessionsForStudent(student)}
+                                  className={compactButtonClass}
+                                >
+                                  生成本月 regular 課次
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    clearRemainingRegularSessionsForStudent(student)
+                                  }
+                                  className={compactDangerButtonClass}
+                                >
+                                  清除本月 regular
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => regenerateRegularSessionsForStudent(student)}
+                                  className={compactButtonClass}
+                                >
+                                  重新生成本月 regular
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openRuleCreateSheet(student)}
+                                  className={compactButtonClass}
+                                >
+                                  新增固定課表
+                                </button>
+                              </div>
+
+                              {ruleCount === 0 ? (
+                                <div className="mt-4 text-[13px] leading-6 text-[#8E8E93]">
+                                  尚未設定固定課表規則。
+                                </div>
+                              ) : (
+                                <div className="mt-4 space-y-3">
+                                  {getRulesForStudent(student.id).map((rule) => (
                           <div
                             key={rule.id}
                             className={cx(
@@ -1484,10 +1763,15 @@ export default function StudentsPage({
                                 </button>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               ))
@@ -1886,6 +2170,74 @@ export default function StudentsPage({
             ) : null}
           </div>
         ) : null}
+      </IOSSheet>
+
+      <IOSSheet
+        open={batchSheetOpen}
+        title="批量生成本月 regular"
+        subtitle="對啟用中且有固定課表的學生在指定日期範圍內生成課次（去重）。"
+        onClose={closeBatchSheet}
+        leftAction={{ label: "取消", onClick: closeBatchSheet }}
+        rightAction={{
+          label: batchRunning ? "處理中…" : "批量生成",
+          onClick: () => {
+            if (batchRunning) return;
+            void runBatchGenerateRegular();
+          },
+          emphasize: true,
+        }}
+      >
+        <div className="space-y-4">
+          <div className={cardClass}>
+            <div className="space-y-4 p-4">
+              <FieldRow label="開始日期">
+                <div className="w-full text-left">
+                  <input
+                    type="date"
+                    value={batchFromDate}
+                    min={selectedDate ? getMonthStartISO(selectedDate) : undefined}
+                    max={selectedDate ? getMonthEndISO(selectedDate) : undefined}
+                    onChange={(e) => {
+                      setBatchFromDate(e.target.value);
+                      if (batchDateError) setBatchDateError("");
+                    }}
+                    className={inputClass}
+                  />
+                </div>
+              </FieldRow>
+              <FieldRow label="結束日期">
+                <div className="w-full text-left">
+                  <input
+                    type="date"
+                    value={batchToDate}
+                    min={selectedDate ? getMonthStartISO(selectedDate) : undefined}
+                    max={selectedDate ? getMonthEndISO(selectedDate) : undefined}
+                    onChange={(e) => {
+                      setBatchToDate(e.target.value);
+                      if (batchDateError) setBatchDateError("");
+                    }}
+                    className={inputClass}
+                  />
+                </div>
+              </FieldRow>
+              {batchDateError ? (
+                <div className="text-xs text-red-500">{batchDateError}</div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className={cardClass}>
+            <div className="space-y-2 p-4 text-[13px] leading-6 text-[#8E8E93]">
+              <div>
+                對象：啟用中且有固定課表的學生
+                （目前 {safeStudents.filter((s) => s.status === "active" && safeRules.some((r) => r.studentId === s.id && r.isActive)).length} 位）
+              </div>
+              <div>同學生 + 同日期 + 同開始時間的 regular 課次會自動略過，不會重複生成。</div>
+              <div>只處理 regular 課次；不會動到 makeup / extra / 既有非 regular 課次。</div>
+              <div>本輪僅限本月範圍：{selectedDate ? selectedDate.slice(0, 7) : "—"}。</div>
+            </div>
+          </div>
+        </div>
       </IOSSheet>
     </div>
   );

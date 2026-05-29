@@ -243,6 +243,17 @@ async function openStudentEditor(user: ReturnType<typeof userEvent.setup>, name:
   await screen.findByText("基本資料");
 }
 
+// 預設情況下每張學生卡片的「固定課表」區是收起的（Phase 4-6A）。
+// 既有測試需要直接操作課表內按鈕，呼叫此 helper 確保展開（idempotent：已展開時 no-op）。
+async function expandSchedule(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string
+) {
+  const card = getStudentCard(name);
+  const toggle = within(card).queryByRole("button", { name: "展開固定課表" });
+  if (toggle) await user.click(toggle);
+}
+
 function backendStudentResponse(overrides: Partial<StudentProfile>) {
   return {
     id: overrides.id ?? 1,
@@ -1099,6 +1110,7 @@ describe("StudentsPage", () => {
       isScheduleRulesBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "新增固定課表" }));
     await user.selectOptions(screen.getByRole("combobox"), "5");
     fireEvent.change(screen.getByDisplayValue("16:00"), { target: { value: "18:30" } });
@@ -1148,6 +1160,7 @@ describe("StudentsPage", () => {
       isScheduleRulesBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "新增固定課表" }));
     await user.click(screen.getByRole("button", { name: "儲存" }));
 
@@ -1161,6 +1174,7 @@ describe("StudentsPage", () => {
   it("creates a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "新增固定課表" }));
 
     expect(screen.getAllByText("新增固定課表").length).toBeGreaterThan(0);
@@ -1198,6 +1212,7 @@ describe("StudentsPage", () => {
     );
     const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "編輯" })[0]);
     fireEvent.change(screen.getByDisplayValue("16:00"), { target: { value: "19:15" } });
     await user.click(screen.getByRole("button", { name: "儲存" }));
@@ -1213,6 +1228,7 @@ describe("StudentsPage", () => {
   it("edits a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "編輯" })[0]);
     fireEvent.change(screen.getByDisplayValue("16:00"), { target: { value: "19:15" } });
     const durationInput = screen.getByRole("spinbutton");
@@ -1246,6 +1262,7 @@ describe("StudentsPage", () => {
     );
     const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "停用" })[0]);
 
     await waitFor(() => expect(snapshot.rules.find((rule) => rule.id === 101)?.isActive).toBe(false));
@@ -1260,6 +1277,7 @@ describe("StudentsPage", () => {
 
   it("deactivates and restores a schedule rule", async () => {
     const { user, snapshot } = renderStudentsPage();
+    await expandSchedule(user, "陳小明");
     const card = getStudentCard("陳小明");
 
     await user.click(within(card).getAllByRole("button", { name: "停用" })[0]);
@@ -1283,6 +1301,7 @@ describe("StudentsPage", () => {
     );
     const { user, snapshot } = renderStudentsPage({ isScheduleRulesBackendAvailable: true });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "刪除" })[0]);
     await user.click(screen.getByRole("button", { name: "確認刪除" }));
 
@@ -1296,6 +1315,7 @@ describe("StudentsPage", () => {
   it("deletes a schedule rule after confirmation", async () => {
     const { user, snapshot } = renderStudentsPage();
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getAllByRole("button", { name: "刪除" })[0]);
     expect(screen.getByText("刪除固定課表規則")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "確認刪除" }));
@@ -1307,6 +1327,7 @@ describe("StudentsPage", () => {
   it("generates remaining monthly regular sessions for an active student and skips duplicates", async () => {
     const { user, snapshot } = renderStudentsPage();
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1355,6 +1376,7 @@ describe("StudentsPage", () => {
     );
     const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1418,6 +1440,7 @@ describe("StudentsPage", () => {
     );
     const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1432,6 +1455,7 @@ describe("StudentsPage", () => {
     vi.stubGlobal("fetch", vi.fn());
     const { user, snapshot } = renderStudentsPage({ isSessionsBackendAvailable: true });
 
+    await expandSchedule(user, "王家朗");
     await user.click(
       within(getStudentCard("王家朗")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1444,6 +1468,7 @@ describe("StudentsPage", () => {
   it("does not generate regular sessions for inactive students", async () => {
     const { user, snapshot } = renderStudentsPage();
 
+    await expandSchedule(user, "王家朗");
     await user.click(
       within(getStudentCard("王家朗")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1457,6 +1482,7 @@ describe("StudentsPage", () => {
       initialRules: [{ id: 101, studentId: 1, weekday: 1, start: "16:00", durationMin: 60, isActive: false }],
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1474,6 +1500,7 @@ describe("StudentsPage", () => {
       initialSessions: [],
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "生成本月 regular 課次" })
     );
@@ -1498,6 +1525,7 @@ describe("StudentsPage", () => {
     ];
     const { user, snapshot } = renderStudentsPage({ initialSessions: sessions });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
 
     await waitFor(() => expect(snapshot.sessions).toHaveLength(5));
@@ -1515,6 +1543,7 @@ describe("StudentsPage", () => {
       initialSessions: makeSessions().filter((session) => session.id !== 201),
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
 
     await waitFor(() =>
@@ -1559,6 +1588,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
 
     await waitFor(() =>
@@ -1618,6 +1648,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(within(getStudentCard("陳小明")).getByRole("button", { name: "清除本月 regular" }));
 
     await waitFor(() =>
@@ -1642,6 +1673,7 @@ describe("StudentsPage", () => {
       initialSessions: [...makeSessions(), staleRegular],
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
     );
@@ -1672,6 +1704,7 @@ describe("StudentsPage", () => {
       initialSessions: [],
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
     );
@@ -1744,6 +1777,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
     );
@@ -1827,6 +1861,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
     );
@@ -1877,6 +1912,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
+    await expandSchedule(user, "陳小明");
     await user.click(
       within(getStudentCard("陳小明")).getByRole("button", { name: "重新生成本月 regular" })
     );
@@ -1886,5 +1922,282 @@ describe("StudentsPage", () => {
     );
     expect(snapshot.sessions.some((s) => s.id === 201)).toBe(true);
     expect(snapshot.sessions.some((s) => s.id === 207)).toBe(true);
+  });
+
+  // ------------------------------------------------------------
+  // Phase 4-6A：固定課表收起 / 展開
+  // ------------------------------------------------------------
+
+  it("collapses each student's fixed schedule section by default", () => {
+    renderStudentsPage();
+
+    const card = getStudentCard("陳小明");
+    // 收起時，動作按鈕與規則列表都不應在 DOM 中。
+    expect(
+      within(card).queryByRole("button", { name: "生成本月 regular 課次" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole("button", { name: "清除本月 regular" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole("button", { name: "重新生成本月 regular" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole("button", { name: "新增固定課表" })
+    ).not.toBeInTheDocument();
+    // 但 summary 仍可見。
+    expect(within(card).getByText("固定課表")).toBeInTheDocument();
+    expect(within(card).getByText(/共\s*3\s*條規則/)).toBeInTheDocument();
+    // 展開按鈕存在且為「展開」狀態。
+    expect(
+      within(card).getByRole("button", { name: "展開固定課表" })
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("expands and re-collapses the fixed schedule section on toggle", async () => {
+    const { user } = renderStudentsPage();
+    const card = getStudentCard("陳小明");
+
+    await user.click(within(card).getByRole("button", { name: "展開固定課表" }));
+    expect(
+      within(card).getByRole("button", { name: "生成本月 regular 課次" })
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByRole("button", { name: "收起固定課表" })
+    ).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(within(card).getByRole("button", { name: "收起固定課表" }));
+    expect(
+      within(card).queryByRole("button", { name: "生成本月 regular 課次" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).getByRole("button", { name: "展開固定課表" })
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("expands one student's schedule without affecting another", async () => {
+    const { user } = renderStudentsPage();
+
+    await user.click(
+      within(getStudentCard("陳小明")).getByRole("button", { name: "展開固定課表" })
+    );
+
+    expect(
+      within(getStudentCard("陳小明")).getByRole("button", {
+        name: "生成本月 regular 課次",
+      })
+    ).toBeInTheDocument();
+    expect(
+      within(getStudentCard("李小欣")).queryByRole("button", {
+        name: "生成本月 regular 課次",
+      })
+    ).not.toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------
+  // Phase 4-6A：批量生成本月 regular
+  // ------------------------------------------------------------
+
+  it("renders the batch generate card with the default month range", async () => {
+    const { user } = renderStudentsPage();
+
+    const batchButton = screen.getByRole("button", { name: "批量生成本月 regular" });
+    expect(batchButton).toBeInTheDocument();
+
+    await user.click(batchButton);
+    // sheet 副標題唯一可識別此 sheet。
+    expect(
+      screen.getByText(/對啟用中且有固定課表的學生在指定日期範圍內生成課次/)
+    ).toBeInTheDocument();
+    // selectedDate = "2026-04-20"，預設範圍 = 2026-04-01 .. 2026-04-30
+    expect(screen.getByDisplayValue("2026-04-01")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2026-04-30")).toBeInTheDocument();
+  });
+
+  it("hides the batch generate card when there are no students", () => {
+    renderStudentsPage({ initialStudents: [], initialRules: [], initialSessions: [] });
+    expect(
+      screen.queryByRole("button", { name: "批量生成本月 regular" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an inline error and does not run when from date is later than to date", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    const inputs = document.querySelectorAll<HTMLInputElement>(
+      'input[type="date"]'
+    );
+    fireEvent.change(inputs[0], { target: { value: "2026-04-20" } });
+    fireEvent.change(inputs[1], { target: { value: "2026-04-10" } });
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    expect(screen.getByText(/結束日期需晚於或等於開始日期/)).toBeInTheDocument();
+    expect(snapshot.sessions).toEqual([]);
+  });
+
+  it("batch-generates regular sessions for active students with active rules and dedups", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    // 學生 1（active）有 weekday 1+3 active rules + weekday 5 inactive rule。
+    // 2026-04 內 Mon(1) = 4 個 (06,13,20,27)，Wed(3) = 5 個 (01,08,15,22,29)。
+    // weekday 5 inactive 不生成。共 9 節。
+    // 學生 2（scheduled_deactivation 非 active）不處理。
+    // 學生 3（inactive）不處理。
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
+    expect(snapshot.sessions.every((s) => s.studentId === 1)).toBe(true);
+    expect(snapshot.sessions.every((s) => s.kind === "regular")).toBe(true);
+    expect(uniqueRegularKeys(snapshot.sessions).size).toBe(9);
+    expect(snapshot.toasts.some((t) => t.startsWith("已批量生成 9 堂"))).toBe(true);
+  });
+
+  it("batch generate reports skipped duplicates on second run", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    // 第二輪應全部 skip，session 數不變。
+    await waitFor(() =>
+      expect(
+        snapshot.toasts.some((t) =>
+          t.includes("範圍內沒有可新增的 regular 課次") && t.includes("略過 9 堂已存在課次")
+        )
+      ).toBe(true)
+    );
+    expect(snapshot.sessions).toHaveLength(9);
+    expect(uniqueRegularKeys(snapshot.sessions).size).toBe(9);
+  });
+
+  it("batch generate appends a no-rule notice when active students lack any rule", async () => {
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [
+        { id: 1, name: "甲", birthday: "2012-01-01", school: "A", status: "active" },
+        { id: 2, name: "乙", birthday: "2012-01-01", school: "B", status: "active" },
+      ],
+      initialRules: [
+        { id: 11, studentId: 1, weekday: 1, start: "16:00", durationMin: 60, isActive: true },
+      ],
+      initialSessions: [],
+    });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    // 學生 1 有 weekday 1 rule，2026-04 內 Mon = 4 個。
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(4));
+    expect(
+      snapshot.toasts.some(
+        (t) => t.includes("已批量生成 4 堂") && t.includes("1 位學生沒有固定課表")
+      )
+    ).toBe(true);
+  });
+
+  it("batch generate honors a restricted date range within the month", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(inputs[0], { target: { value: "2026-04-15" } });
+    fireEvent.change(inputs[1], { target: { value: "2026-04-30" } });
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    // 學生 1 Mon (20, 27) = 2 個 + Wed (15, 22, 29) = 3 個 = 5 個。
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(5));
+    expect(
+      snapshot.sessions.every((s) => s.dateISO >= "2026-04-15" && s.dateISO <= "2026-04-30")
+    ).toBe(true);
+  });
+
+  it("batch generate posts each session through the backend in backend mode", async () => {
+    const payloads: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body));
+        payloads.push(payload);
+        return {
+          ok: true,
+          json: async () =>
+            backendSessionResponse({
+              id: 900 + payloads.length,
+              studentId: payload.studentId as number,
+              student: { id: 1, name: "陳小明" },
+              dateISO: payload.dateISO as string,
+              start: payload.start as string,
+              durationMin: payload.durationMin as number,
+              kind: "regular",
+              scheduleRuleId: payload.scheduleRuleId as number,
+            }),
+        };
+      })
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: [],
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
+    expect(fetch).toHaveBeenCalledTimes(9);
+    expect(payloads.every((p) => p.kind === "regular")).toBe(true);
+    expect(payloads.every((p) => p.studentId === 1)).toBe(true);
+    expect(payloads.every((p) => p.makeupOfSessionId === null)).toBe(true);
+  });
+
+  it("batch generate surfaces a toast when backend session creation fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialSessions: [],
+      isSessionsBackendAvailable: true,
+    });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("批量生成 regular 失敗，請確認後端是否正常")
+    );
+    expect(snapshot.sessions).toEqual([]);
+  });
+
+  it("batch generate reports no active students when none are active", async () => {
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [
+        {
+          id: 1,
+          name: "甲",
+          birthday: "2012-01-01",
+          school: "A",
+          status: "inactive",
+          deactivateMode: "immediate",
+        },
+      ],
+      initialRules: [],
+      initialSessions: [],
+    });
+
+    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("沒有可批量生成的啟用中學生"));
+    expect(snapshot.sessions).toEqual([]);
   });
 });
