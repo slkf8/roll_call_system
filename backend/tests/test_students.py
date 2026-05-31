@@ -101,3 +101,50 @@ def test_empty_name_is_rejected(client: TestClient):
     response = client.post("/api/students", json={"name": "   "})
 
     assert response.status_code == 422
+
+
+# --- Lenient-contract locks (frontend plan B relies on these) -----------
+# Only `name` is required; birthday and school are optional and default to "".
+# These guard against accidental future tightening of the create schema.
+
+
+def test_create_student_with_empty_school(client: TestClient):
+    response = client.post(
+        "/api/students",
+        json={"name": "無學校", "birthday": "2000-01-01", "school": ""},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["school"] == ""
+
+
+def test_create_student_without_school_field(client: TestClient):
+    response = client.post(
+        "/api/students",
+        json={"name": "缺學校欄位", "birthday": "2000-01-01"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["school"] == ""
+
+
+def test_create_student_with_empty_birthday(client: TestClient):
+    response = client.post(
+        "/api/students",
+        json={"name": "無生日", "birthday": "", "school": "某校"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["birthday"] == ""
+
+
+def test_update_student_can_clear_school(client: TestClient):
+    created = client.post(
+        "/api/students",
+        json={"name": "有學校", "school": "原校"},
+    ).json()
+
+    response = client.patch(f"/api/students/{created['id']}", json={"school": ""})
+
+    assert response.status_code == 200
+    assert response.json()["school"] == ""

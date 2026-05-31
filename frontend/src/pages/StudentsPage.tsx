@@ -1152,8 +1152,22 @@ export default function StudentsPage({
     setDraft({ name: "", birthday: "", school: "" });
   }
 
+  // 學生主檔必填規則（方案 B）：姓名必填、生日必填、學校選填。
+  // 不再 silently return —— 缺欄位時給精準 toast。新增與編輯共用。
+  function validateDraftOrToast(): boolean {
+    if (!draft.name.trim()) {
+      setToast?.("請輸入學生姓名");
+      return false;
+    }
+    if (!draft.birthday.trim()) {
+      setToast?.("請輸入學生生日");
+      return false;
+    }
+    return true;
+  }
+
   async function executeDraftSave() {
-    if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
+    if (!validateDraftOrToast()) return;
 
     if (editorMode === "create") {
       const payload = {
@@ -1203,7 +1217,7 @@ export default function StudentsPage({
   }
 
   async function handleSubmitDraft() {
-    if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
+    if (!validateDraftOrToast()) return;
 
     const duplicates = findDuplicates(safeStudents, draft, editingStudent?.id);
     if (duplicates.length > 0) {
@@ -1789,7 +1803,6 @@ export default function StudentsPage({
         rightAction={{
           label: editorMode === "create" ? "建立" : "儲存",
           onClick: () => {
-            if (!draft.name.trim() || !draft.birthday.trim() || !draft.school.trim()) return;
             void handleSubmitDraft();
           },
           emphasize: true,

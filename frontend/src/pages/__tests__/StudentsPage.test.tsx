@@ -386,6 +386,138 @@ describe("StudentsPage", () => {
     );
   });
 
+  it("creates a student with an empty school (school optional, plan B)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          id: 901,
+          name: "無學校學生",
+          birthday: "2012-04-05",
+          school: "",
+          status: "active",
+          deactivateMode: null,
+          deactivateOn: null,
+          createdAt: "2026-05-25T10:00:00",
+          updatedAt: "2026-05-25T10:00:00",
+        }),
+      }))
+    );
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: true,
+    });
+
+    // 只填姓名 + 生日，學校留空。
+    await user.click(screen.getAllByRole("button", { name: "新增學生" })[0]);
+    const inputs = document.querySelectorAll("input");
+    fireEvent.change(inputs[1], { target: { value: "無學校學生" } });
+    fireEvent.change(inputs[2], { target: { value: "2012-04-05" } });
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() =>
+      expect(snapshot.students).toEqual([
+        expect.objectContaining({ id: 901, name: "無學校學生", school: "" }),
+      ])
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "無學校學生",
+          birthday: "2012-04-05",
+          school: "",
+          status: "active",
+        }),
+      })
+    );
+  });
+
+  it("blocks creation with an empty name and shows a precise toast", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: true,
+    });
+
+    // 留空姓名，填生日 + 學校。
+    await user.click(screen.getAllByRole("button", { name: "新增學生" })[0]);
+    const inputs = document.querySelectorAll("input");
+    fireEvent.change(inputs[2], { target: { value: "2012-04-05" } });
+    fireEvent.change(inputs[3], { target: { value: "測試學校" } });
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("請輸入學生姓名"));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(snapshot.students).toEqual([]);
+  });
+
+  it("blocks creation with an empty birthday and shows a precise toast", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { user, snapshot } = renderStudentsPage({
+      initialStudents: [],
+      initialRules: [],
+      initialSessions: [],
+      isStudentsBackendAvailable: true,
+    });
+
+    // 填姓名 + 學校，留空生日。
+    await user.click(screen.getAllByRole("button", { name: "新增學生" })[0]);
+    const inputs = document.querySelectorAll("input");
+    fireEvent.change(inputs[1], { target: { value: "無生日學生" } });
+    fireEvent.change(inputs[3], { target: { value: "測試學校" } });
+    await user.click(screen.getByRole("button", { name: "建立" }));
+
+    await waitFor(() => expect(snapshot.toasts).toContain("請輸入學生生日"));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(snapshot.students).toEqual([]);
+  });
+
+  it("edits a student to clear the school (PATCH school empty string)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ({
+          ok: true,
+          json: async () =>
+            backendStudentResponse({
+              id: 1,
+              name: "陳小明",
+              birthday: "2012-03-08",
+              school: "",
+              status: "active",
+            }),
+        })
+      )
+    );
+    const { user, snapshot } = renderStudentsPage({ isStudentsBackendAvailable: true });
+
+    await openStudentEditor(user, "陳小明");
+    fireEvent.change(screen.getByDisplayValue("培正中學"), { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(snapshot.students.find((student) => student.id === 1)?.school).toBe("")
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/students/1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "陳小明",
+          birthday: "2012-03-08",
+          school: "",
+        }),
+      })
+    );
+  });
+
   it("does not create a local student when backend create fails in backend mode", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal(
