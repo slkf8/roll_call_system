@@ -36,8 +36,18 @@ def test_root_returns_built_index_html(client: TestClient):
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    # Entry HTML must never be cached so a stale index.html cannot point at a
+    # hashed bundle that no longer exists after a redeploy.
+    assert response.headers["cache-control"] == "no-store, max-age=0"
     # Built index.html always contains the React root mount point.
     assert 'id="root"' in response.text
+
+
+def test_head_root_sets_no_store(client: TestClient):
+    response = client.head("/")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
 
 
 def test_health_unaffected_by_static_mount(client: TestClient):
@@ -45,6 +55,8 @@ def test_health_unaffected_by_static_mount(client: TestClient):
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+    # Health is JSON, untouched by the entry-HTML no-store policy.
+    assert "no-store" not in response.headers.get("cache-control", "")
 
 
 def test_assets_js_file_is_served(client: TestClient):
@@ -62,3 +74,6 @@ def test_assets_js_file_is_served(client: TestClient):
     assert response.status_code == 200
     content_type = response.headers.get("content-type", "")
     assert "javascript" in content_type or "ecmascript" in content_type
+    # Hashed assets keep normal StaticFiles caching; the no-store policy is
+    # entry-HTML only and must not leak onto /assets/*.
+    assert "no-store" not in response.headers.get("cache-control", "")

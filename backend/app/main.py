@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import _is_packaged, get_allowed_origins, get_frontend_dist_dir
@@ -48,6 +49,19 @@ app.include_router(exports.router)
 # index.html for unmatched non-API paths.
 _frontend_dist = get_frontend_dist_dir()
 if _frontend_dist is not None:
+    _index_html = _frontend_dist / "index.html"
+
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    def _serve_index() -> HTMLResponse:
+        # Entry HTML is never cached so the browser cannot reuse a stale
+        # index.html that points at a hashed bundle which no longer exists
+        # after a redeploy. Hashed /assets/* keep their normal StaticFiles
+        # caching (ETag / Last-Modified) below.
+        return HTMLResponse(
+            content=_index_html.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
     app.mount(
         "/",
         StaticFiles(directory=str(_frontend_dist), html=True),
