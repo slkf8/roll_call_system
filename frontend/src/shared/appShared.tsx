@@ -90,7 +90,13 @@ export const reasonsSeed: Reason[] = [
   { id: 3, name: "交通", code: "TRAF" },
   { id: 4, name: "未通知", code: "NO" },
   { id: 5, name: "考試/活動", code: "EXAM" },
+  { id: 6, name: "天氣", code: "WEA" },
 ];
+
+// 白名單：課次卡片缺席 badge 只附帶預設缺席原因，排除歷史/自訂字串。
+const SESSION_CARD_PRESET_REASON_NAMES = new Set(
+  reasonsSeed.map((r) => r.name),
+);
 
 export const studentsSeed: Student[] = [
   { id: 1, name: "陳小明" },
@@ -793,7 +799,12 @@ export function SessionCard({
     ) : effectiveStatus === "present" ? (
       <Pill tone="success">已到</Pill>
     ) : effectiveStatus === "absent" ? (
-      <Pill tone="danger">缺席</Pill>
+      <Pill tone="danger">
+        缺席
+        {s.reason && SESSION_CARD_PRESET_REASON_NAMES.has(s.reason.name)
+          ? ` · ${s.reason.name}`
+          : ""}
+      </Pill>
     ) : (
       <Pill tone="muted">停課</Pill>
     );
@@ -824,13 +835,6 @@ export function SessionCard({
               <span className={isDark ? 'text-[#3A3A3C]' : 'text-slate-300'}> · </span>
               {s.start}–{endTime(s)}
             </div>
-
-            {s.status === "absent" && s.reason ? (
-              <div className={`mt-2 text-sm ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>
-                缺席原因：<span className={`font-semibold ${isDark ? 'text-[#D1D1D6]' : 'text-slate-700'}`}>{s.reason.name}</span>
-                {s.note ? <span className={isDark ? 'text-[#8E8E93]' : 'text-slate-400'}> · {s.note}</span> : null}
-              </div>
-            ) : null}
           </div>
         </div>
 

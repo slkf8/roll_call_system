@@ -1020,4 +1020,68 @@ describe("DataPage", () => {
     expect(screen.queryByRole("button", { name: /點名/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
+
+  it("shows the preset absent reason inside the same badge and never shows the note", async () => {
+    const studentsOnly: StudentProfile[] = [
+      { id: 1, name: "陳小明", birthday: "2012-03-08", school: "培正中學", status: "active" },
+    ];
+    const sessionsWithReason: Session[] = [
+      {
+        id: 50,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-11-12",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        reason: { id: 6, name: "天氣", code: "WEA" },
+        note: "私密備註",
+      },
+    ];
+    const { user } = renderDataPage({
+      initialStudents: studentsOnly,
+      initialSessions: sessionsWithReason,
+    });
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+
+    // status 與預設原因包在同一個 badge 內：缺席 · 天氣
+    expect(screen.getByText("缺席 · 天氣")).toBeInTheDocument();
+    // note 內容永不顯示。
+    expect(screen.queryByText(/私密備註/)).not.toBeInTheDocument();
+  });
+
+  it("shows only 缺席 when the absent reason is not a preset (no custom reason text)", async () => {
+    const studentsOnly: StudentProfile[] = [
+      { id: 1, name: "陳小明", birthday: "2012-03-08", school: "培正中學", status: "active" },
+    ];
+    const sessionsWithCustomReason: Session[] = [
+      {
+        id: 51,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-11-13",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        reason: { id: 0, name: "自訂原因文字", code: "BACKEND_REASON" },
+        note: "私密備註",
+      },
+    ];
+    const { user } = renderDataPage({
+      initialStudents: studentsOnly,
+      initialSessions: sessionsWithCustomReason,
+    });
+    const section = getSectionByHeading("每學生出席次數");
+
+    await user.click(getRowByCell(section, "陳小明"));
+
+    // 只顯示「缺席」，非預設原因文字不顯示。
+    expect(screen.getByText("缺席")).toBeInTheDocument();
+    expect(screen.queryByText(/自訂原因文字/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/私密備註/)).not.toBeInTheDocument();
+  });
 });

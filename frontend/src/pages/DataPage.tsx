@@ -21,8 +21,13 @@ import {
   ThemeToggle,
   pad2,
   parseISO,
+  reasonsSeed,
   todayISO,
 } from "../shared/appShared";
+
+// 白名單：只顯示缺席 Bottom Sheet 提供的預設原因，排除歷史/自訂字串。
+// 單一事實來源 = reasonsSeed（新增「天氣」後自動納入）。
+const PRESET_REASON_NAMES = new Set(reasonsSeed.map((r) => r.name));
 
 type DataPageProps = {
   setTheme: Dispatch<SetStateAction<"light" | "dark">>;
@@ -1268,6 +1273,11 @@ export default function DataPage({
                                                 )}`}
                                               >
                                                 {formatSessionStatusLabel(session.status)}
+                                                {session.status === "absent" &&
+                                                session.reason &&
+                                                PRESET_REASON_NAMES.has(session.reason.name)
+                                                  ? ` · ${session.reason.name}`
+                                                  : ""}
                                               </span>
                                             </td>
                                           </tr>

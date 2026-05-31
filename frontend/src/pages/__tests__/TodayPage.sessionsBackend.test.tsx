@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import * as React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -188,15 +188,63 @@ describe("TodayPage backend session status updates", () => {
     await user.click(screen.getByRole("button", { name: /生病/ }));
 
     await waitFor(() => {
+      // PATCH payload 仍保留 reason 與 note（送後端行為不變）。
       expect(updateSession).toHaveBeenCalledWith(10, {
         status: "absent",
         reason: "生病",
         note: "已通知家長",
       });
-      expect(screen.getByText("缺席")).toBeInTheDocument();
-      expect(screen.getByText("生病")).toBeInTheDocument();
-      expect(screen.getByText(/已通知家長/)).toBeInTheDocument();
+      // 卡片右上單一 badge：缺席 · 生病
+      expect(screen.getByText("缺席 · 生病")).toBeInTheDocument();
     });
+    // note 不再顯示於課次卡片任何位置。
+    expect(screen.queryByText(/已通知家長/)).not.toBeInTheDocument();
+  });
+
+  it("shows the 天氣 (WEA) reason button and sends 天氣 through backend PATCH", async () => {
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      status: "absent",
+      reason: { id: 6, name: "天氣", code: "WEA" },
+      note: undefined,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+    // 缺席 Bottom Sheet 出現「天氣 WEA」按鈕。
+    const weatherButton = screen.getByRole("button", { name: /天氣/ });
+    expect(weatherButton).toBeInTheDocument();
+    expect(within(weatherButton).getByText("WEA")).toBeInTheDocument();
+
+    await user.click(weatherButton);
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        status: "absent",
+        reason: "天氣",
+        note: null,
+      });
+      // 卡片右上單一 badge：缺席 · 天氣
+      expect(screen.getByText("缺席 · 天氣")).toBeInTheDocument();
+    });
+  });
+
+  it("shows only 缺席 on the card when the absent reason is not a preset", async () => {
+    const absentCustom: Session = {
+      ...baseSession,
+      status: "absent",
+      reason: { id: 0, name: "自訂原因文字", code: "BACKEND_REASON" },
+      note: "私密備註",
+    };
+    render(<TodayHarness isSessionsBackendAvailable={true} initialSessions={[absentCustom]} />);
+
+    // 非預設原因不附加到 badge；badge 只顯示「缺席」。
+    expect(screen.getByText("缺席")).toBeInTheDocument();
+    expect(screen.queryByText(/自訂原因文字/)).not.toBeInTheDocument();
+    // note 不顯示於卡片。
+    expect(screen.queryByText(/私密備註/)).not.toBeInTheDocument();
   });
 
   it("creates a single session through backend POST when sessions backend is available", async () => {
