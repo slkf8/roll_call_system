@@ -6,15 +6,35 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import _is_packaged, get_allowed_origins, get_frontend_dist_dir
+from app.config import _is_packaged, get_allowed_origins, get_data_dir, get_frontend_dist_dir
 from app.database import init_db
 from app.routers import exports, global_events, schedule_rules, sessions, statistics, students
+from app.services import backup_service
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Resolve the data dir once and reuse the same Path for start + stop.
+    backup_data_dir = get_data_dir()
+    backup_enabled = backup_service.backup_enabled()
+    preflight_enabled = backup_service.primary_db_preflight_enabled()
+
+    # Guard against silently re-creating a lost primary DB (independent of
+    # the backup scheduler). Runs before init_db; may raise to abort startup.
+    if preflight_enabled:
+        backup_service.preflight_primary_db(backup_data_dir)
+
     init_db()
-    yield
+
+    scheduler = None
+    if backup_enabled:
+        backup_service.install_mutation_hooks()
+        scheduler = await backup_service.start(backup_data_dir)
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            await backup_service.stop(scheduler)
 
 
 app = FastAPI(title="Roll Call Backend", version="0.1.0", lifespan=lifespan)

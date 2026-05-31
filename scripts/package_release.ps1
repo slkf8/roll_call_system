@@ -83,39 +83,59 @@ if (-not (Test-Path $BinarySrc)) {
   exit 1
 }
 
-# ---------- (Re)create release folder ----------
-Log "Preparing release folder: $ReleaseDir"
+# ---------- Build into a staging folder, then atomic rename ----------
+# Never silently delete an existing release folder. Build into a fixed
+# staging dir, wipe data\ there (behind a fixed allowlist guard), then
+# rename staging into place. The destructive Remove-Item can only ever touch
+# release\RollCall_Portable_Windows.staging\roll_call_backend\data.
+$ExpectedReleaseDir = [System.IO.Path]::GetFullPath(
+  (Join-Path $RepoRoot "release\RollCall_Portable_Windows")
+)
+$ActualReleaseDir = [System.IO.Path]::GetFullPath($ReleaseDir)
+$ExpectedStagingDir = "$ExpectedReleaseDir.staging"
+$StagingDir = "$ActualReleaseDir.staging"
+$ExpectedStagingData = [System.IO.Path]::GetFullPath(
+  (Join-Path $ExpectedStagingDir "roll_call_backend\data")
+)
+$StagingDataDir = [System.IO.Path]::GetFullPath(
+  (Join-Path $StagingDir "roll_call_backend\data")
+)
+
+if (
+  $ActualReleaseDir -ne $ExpectedReleaseDir -or
+  $StagingDir -ne $ExpectedStagingDir -or
+  $StagingDataDir -ne $ExpectedStagingData
+) {
+  throw "unsafe release/staging path resolution; aborting."
+}
+
+if (Test-Path -LiteralPath $ActualReleaseDir) {
+  throw "release folder already exists: $ActualReleaseDir. Refusing to delete it; move or remove it manually, then re-run."
+}
+
+Log "Preparing staging folder: $StagingDir"
 if (-not (Test-Path $ReleaseRoot)) {
   New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 }
-if (Test-Path $ReleaseDir) {
-  Remove-Item -Recurse -Force $ReleaseDir
-}
-New-Item -ItemType Directory -Path $ReleaseDir | Out-Null
+# Staging is ours to recreate; only ever the guarded staging path.
+Remove-Item -LiteralPath $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $StagingDir | Out-Null
 
 # ---------- Copy bundle ----------
 Log "Copying PyInstaller bundle..."
-Copy-Item -Recurse $BundleSrc (Join-Path $ReleaseDir "roll_call_backend")
+Copy-Item -Recurse $BundleSrc (Join-Path $StagingDir "roll_call_backend")
 
-# Strip any seeded DB. The source bundle may contain a development /
-# acceptance DB from prior runs; the release ships clean so end users see
-# an empty system on first launch. Keep the data\ directory so first
-# launch only has to write app.db, not also mkdir.
-$DestDataDir = Join-Path $ReleaseDir "roll_call_backend\data"
-if (-not (Test-Path $DestDataDir)) {
-  New-Item -ItemType Directory -Path $DestDataDir | Out-Null
+# Guarantee zero data: wipe the whole data\ in staging and recreate empty
+# data\ + data\backups\. Guard re-checked immediately before the delete.
+if ($StagingDataDir -ne $ExpectedStagingData) {
+  throw "unsafe staging data path: $StagingDataDir"
 }
-$RemovedAny = $false
-foreach ($f in @("app.db", "app.db-journal", "app.db-wal", "app.db-shm")) {
-  $Candidate = Join-Path $DestDataDir $f
-  if (Test-Path $Candidate) {
-    Remove-Item -Force $Candidate
-    $RemovedAny = $true
-  }
-}
-if ($RemovedAny) {
-  Write-Host "  (removed seeded DB artifacts; release is clean)"
-}
+Remove-Item -LiteralPath $StagingDataDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force (Join-Path $StagingDataDir "backups") | Out-Null
+Write-Host "  (release ships with empty data\ and data\backups\)"
+
+# ---------- Promote staging to the real release folder ----------
+Move-Item -LiteralPath $StagingDir -Destination $ActualReleaseDir
 
 # ---------- Generate launcher (.bat) ----------
 Log "Generating launcher..."

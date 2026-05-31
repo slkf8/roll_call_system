@@ -49,12 +49,18 @@ exports/*
 *.xls
 *.xlsm
 
-# DB（若你之後用 SQLite）
+# DB（全域防呆：任何 SQLite / 備份檔都不進版控，含 repo 根的 app_backup.db）
+*.db
+*.db.tmp
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 backend/data/*.db
 backend/data/*.db-journal
 backend/data/*.sqlite
 backend/data/*.sqlite3
+backend/data/backups/
 backend/__pycache__/
 backend/.pytest_cache/

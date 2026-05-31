@@ -69,32 +69,53 @@ if [ ! -x "$BINARY_SRC" ]; then
   exit 1
 fi
 
-# ---------- (Re)create release folder ----------
-log "Preparing release folder: $RELEASE_DIR"
+# ---------- Build into a staging folder, then atomic rename ----------
+# Never silently delete an existing release folder. Build into a fixed
+# staging dir, wipe data/ there (behind a fixed allowlist guard), then
+# rename staging into place. This guarantees the destructive `rm -rf` can
+# only ever touch release/RollCall_Portable_macOS.staging/roll_call_backend/data.
+EXPECTED_RELEASE_DIR="$REPO_ROOT/release/RollCall_Portable_macOS"
+EXPECTED_STAGING_DIR="$EXPECTED_RELEASE_DIR.staging"
+STAGING_DIR="$RELEASE_DIR.staging"
+EXPECTED_STAGING_DATA="$EXPECTED_STAGING_DIR/roll_call_backend/data"
+STAGING_DATA_DIR="$STAGING_DIR/roll_call_backend/data"
+
+if [ "$RELEASE_DIR" != "$EXPECTED_RELEASE_DIR" ] \
+   || [ "$STAGING_DIR" != "$EXPECTED_STAGING_DIR" ] \
+   || [ "$STAGING_DATA_DIR" != "$EXPECTED_STAGING_DATA" ]; then
+  echo "ERROR: unsafe release/staging path resolution; aborting." >&2
+  exit 1
+fi
+
+if [ -e "$RELEASE_DIR" ]; then
+  echo "ERROR: release folder already exists: $RELEASE_DIR" >&2
+  echo "Refusing to delete it. Move or remove it manually, then re-run." >&2
+  exit 1
+fi
+
+log "Preparing staging folder: $STAGING_DIR"
 mkdir -p "$RELEASE_ROOT"
-rm -rf "$RELEASE_DIR"
-mkdir -p "$RELEASE_DIR"
+# Staging is ours to recreate; only ever the guarded staging path.
+rm -rf -- "$STAGING_DIR"
+mkdir -p "$STAGING_DIR"
 
 # ---------- Copy bundle ----------
 log "Copying PyInstaller bundle..."
-cp -R "$BUNDLE_SRC" "$RELEASE_DIR/roll_call_backend"
+cp -R "$BUNDLE_SRC" "$STAGING_DIR/roll_call_backend"
 
-# Strip any seeded DB. The source bundle may contain a development / acceptance
-# DB from prior runs; the release ships clean so end users see an empty system
-# on first launch. The data/ directory itself is kept so first launch only has
-# to write app.db, not also mkdir.
-DEST_DATA_DIR="$RELEASE_DIR/roll_call_backend/data"
-mkdir -p "$DEST_DATA_DIR"
-removed_any=false
-for f in app.db app.db-journal app.db-wal app.db-shm; do
-  if [ -e "$DEST_DATA_DIR/$f" ]; then
-    rm -f "$DEST_DATA_DIR/$f"
-    removed_any=true
-  fi
-done
-if [ "$removed_any" = true ]; then
-  echo "  (removed seeded DB artifacts; release is clean)"
+# Guarantee zero data: wipe the whole data/ in staging and recreate empty
+# data/ + data/backups/. Guard ensures the target is exactly the staging
+# data dir before the recursive delete.
+if [ "$STAGING_DATA_DIR" != "$EXPECTED_STAGING_DATA" ]; then
+  echo "ERROR: unsafe staging data path: $STAGING_DATA_DIR" >&2
+  exit 1
 fi
+rm -rf -- "$STAGING_DATA_DIR"
+mkdir -p -- "$STAGING_DATA_DIR/backups"
+echo "  (release ships with empty data/ and data/backups/)"
+
+# ---------- Promote staging to the real release folder ----------
+mv "$STAGING_DIR" "$RELEASE_DIR"
 
 # ---------- Generate launcher (.command) ----------
 log "Generating launcher..."
