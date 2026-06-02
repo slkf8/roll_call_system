@@ -9,6 +9,7 @@ from app.schemas import (
     SessionStudentSnapshot,
     SessionUpdate,
     _validate_required_date,
+    normalize_materials,
 )
 
 
@@ -40,6 +41,8 @@ def to_session_read(record: AttendanceSession, db: Session) -> SessionRead:
         makeupOfDateISO=record.makeup_of_date_iso,
         makeupOfSessionId=record.makeup_of_session_id,
         scheduleRuleId=record.schedule_rule_id,
+        materialsProvided=bool(record.materials_provided),
+        materialsReasonCode=record.materials_reason_code,
         createdAt=_dt_to_iso(record.created_at),
         updatedAt=_dt_to_iso(record.updated_at),
     )
@@ -110,6 +113,13 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
     _ensure_makeup_source(payload.makeupOfSessionId, db)
     _ensure_schedule_rule(payload.scheduleRuleId, db)
 
+    try:
+        materials_provided, materials_reason_code = normalize_materials(
+            payload.status, payload.materialsProvided, payload.materialsReasonCode
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     record = AttendanceSession(
         student_id=payload.studentId,
         date_iso=payload.dateISO,
@@ -122,6 +132,8 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
         makeup_of_date_iso=payload.makeupOfDateISO,
         makeup_of_session_id=payload.makeupOfSessionId,
         schedule_rule_id=payload.scheduleRuleId,
+        materials_provided=materials_provided,
+        materials_reason_code=materials_reason_code,
     )
     db.add(record)
     db.commit()
@@ -170,6 +182,26 @@ def update_session(
         if value is None and api_field in required_fields:
             continue
         setattr(record, model_field, value)
+
+    # Merge existing + payload, then normalize materials against the effective
+    # status. record.status already reflects the merged status above.
+    if "materialsProvided" in updates and updates["materialsProvided"] is not None:
+        effective_provided = updates["materialsProvided"]
+    else:
+        effective_provided = bool(record.materials_provided)
+    if "materialsReasonCode" in updates:
+        effective_code = updates["materialsReasonCode"]
+    else:
+        effective_code = record.materials_reason_code
+
+    try:
+        materials_provided, materials_reason_code = normalize_materials(
+            record.status, effective_provided, effective_code
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    record.materials_provided = materials_provided
+    record.materials_reason_code = materials_reason_code
 
     if updates:
         record.updated_at = utc_now()

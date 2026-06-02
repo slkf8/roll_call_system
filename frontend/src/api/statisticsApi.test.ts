@@ -15,6 +15,7 @@ const monthlyStatisticsResponse = {
     cancelledCount: 0,
     scheduleRuleCount: 2,
     globalEventCount: 1,
+    materialsCount: 1,
   },
   students: [
     {
@@ -27,6 +28,7 @@ const monthlyStatisticsResponse = {
       makeupPresentCount: 1,
       extraPresentCount: 1,
       totalPresentCount: 3,
+      materialsCount: 1,
     },
   ],
   warnings: [
@@ -194,6 +196,34 @@ describe("statisticsApi", () => {
           },
         ],
       })
+    );
+  });
+
+  it("parses materialsCount on summary and student rows", async () => {
+    mockJsonResponse({
+      ...monthlyStatisticsResponse,
+      summary: { ...monthlyStatisticsResponse.summary, materialsCount: 2 },
+      students: [
+        { ...monthlyStatisticsResponse.students[0], materialsCount: 2 },
+      ],
+    });
+
+    await expect(fetchMonthlyStatistics("2026-06")).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({ materialsCount: 2 }),
+        students: [expect.objectContaining({ materialsCount: 2 })],
+      })
+    );
+  });
+
+  it("throws when materialsCount is invalid", async () => {
+    mockJsonResponse({
+      ...monthlyStatisticsResponse,
+      summary: { ...monthlyStatisticsResponse.summary, materialsCount: "2" },
+    });
+
+    await expect(fetchMonthlyStatistics("2026-06")).rejects.toThrow(
+      "Invalid monthly statistics response"
     );
   });
 

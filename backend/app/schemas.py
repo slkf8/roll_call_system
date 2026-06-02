@@ -10,7 +10,29 @@ DeactivateMode = Literal["immediate", "scheduled"]
 Weekday = Literal[0, 1, 2, 3, 4, 5, 6]
 SessionStatus = Literal["pending", "present", "absent", "cancelled"]
 SessionKind = Literal["regular", "makeup", "extra"]
+MaterialsReasonCode = Literal[1, 2, 3, 4, 5, 6]
 GlobalEventMode = Literal["allDay", "timeRange"]
+
+
+def normalize_materials(
+    status: str,
+    materials_provided: bool,
+    materials_reason_code: int | None,
+) -> tuple[bool, int | None]:
+    """Apply the materials invariants and return effective (provided, code).
+
+    Rules (single source of truth, shared by POST and PATCH):
+      - effective status != absent  -> provided False, code None
+      - effective provided is False -> code None
+      - effective provided is True  -> code must be in 1..6, else ValueError
+    """
+    if status != "absent":
+        return False, None
+    if not materials_provided:
+        return False, None
+    if materials_reason_code not in (1, 2, 3, 4, 5, 6):
+        raise ValueError("materialsReasonCode must be 1-6 when materialsProvided is true")
+    return True, materials_reason_code
 
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -175,6 +197,8 @@ class SessionBase(BaseModel):
     makeupOfDateISO: str | None = None
     makeupOfSessionId: int | None = None
     scheduleRuleId: int | None = None
+    materialsProvided: bool = False
+    materialsReasonCode: MaterialsReasonCode | None = None
 
     @field_validator("dateISO")
     @classmethod
@@ -208,6 +232,8 @@ class SessionUpdate(BaseModel):
     makeupOfDateISO: str | None = None
     makeupOfSessionId: int | None = None
     scheduleRuleId: int | None = None
+    materialsProvided: bool | None = None
+    materialsReasonCode: MaterialsReasonCode | None = None
 
     @field_validator("dateISO")
     @classmethod
@@ -241,6 +267,8 @@ class SessionRead(BaseModel):
     makeupOfDateISO: str | None
     makeupOfSessionId: int | None
     scheduleRuleId: int | None
+    materialsProvided: bool
+    materialsReasonCode: int | None
     createdAt: str = Field(description="ISO datetime")
     updatedAt: str = Field(description="ISO datetime")
 
@@ -323,6 +351,7 @@ class MonthlyStatisticsSummary(BaseModel):
     cancelledCount: int
     scheduleRuleCount: int
     globalEventCount: int
+    materialsCount: int
 
 
 class MonthlyStatisticsStudentRow(BaseModel):
@@ -335,6 +364,7 @@ class MonthlyStatisticsStudentRow(BaseModel):
     makeupPresentCount: int
     extraPresentCount: int
     totalPresentCount: int
+    materialsCount: int
 
 
 class MonthlyStatisticsWarning(BaseModel):

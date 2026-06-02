@@ -29,6 +29,8 @@ export const closureReasonsSeed: ClosureReason[] = [
   "其他",
 ];
 
+export type MaterialsReasonCode = 1 | 2 | 3 | 4 | 5 | 6;
+
 export type Session = {
   id: number;
   studentId?: number;
@@ -42,6 +44,10 @@ export type Session = {
   kind: "regular" | "makeup" | "extra";
   makeupOfDateISO?: string;
   makeupOfSessionId?: number;
+  // Materials service ("教材"): only meaningful on absent sessions. Normalized
+  // state is always a stable boolean + (null | 1–6), never undefined.
+  materialsProvided: boolean;
+  materialsReasonCode: MaterialsReasonCode | null;
 };
 
 export type GlobalEvent = {
@@ -97,6 +103,85 @@ export const reasonsSeed: Reason[] = [
 const SESSION_CARD_PRESET_REASON_NAMES = new Set(
   reasonsSeed.map((r) => r.name),
 );
+
+// --- Materials service (教材) ---
+
+export type MaterialsReasonOption = { code: MaterialsReasonCode; label: string };
+
+export const materialsReasonOptions: MaterialsReasonOption[] = [
+  { code: 1, label: "政府措施" },
+  { code: 2, label: "活動／考試" },
+  { code: 3, label: "停課／天氣" },
+  { code: 4, label: "生病" },
+  { code: 5, label: "親屬死亡" },
+  { code: 6, label: "其他" },
+];
+
+export const REASON6_PER_SCHOOL_YEAR_LIMIT = 3;
+
+export function materialsReasonLabel(code: MaterialsReasonCode): string {
+  return materialsReasonOptions.find((o) => o.code === code)?.label ?? "";
+}
+
+// "教材 · 4 生病"
+export function formatMaterialsBadge(code: MaterialsReasonCode): string {
+  return `教材 · ${code} ${materialsReasonLabel(code)}`;
+}
+
+// --- School year (學年) helpers: Sep 1 – Aug 31 ---
+
+export type SchoolYearRange = { startISO: string; endISO: string };
+
+export function computeDefaultSchoolYear(dateISO: string): SchoolYearRange {
+  const d = parseISO(dateISO);
+  const year = d.getFullYear();
+  const month = d.getMonth(); // 0-based
+  // Sep (8) onwards belongs to year..year+1; Jan–Aug belongs to year-1..year.
+  const startYear = month >= 8 ? year : year - 1;
+  return {
+    startISO: `${startYear}-09-01`,
+    endISO: `${startYear + 1}-08-31`,
+  };
+}
+
+export function isWithinSchoolYear(dateISO: string, range: SchoolYearRange): boolean {
+  return dateISO >= range.startISO && dateISO <= range.endISO;
+}
+
+// Apply a manual override only when the date falls inside it; otherwise fall
+// back to the default Sep–Aug school year for that date.
+export function resolveSchoolYearRange(
+  dateISO: string,
+  override: SchoolYearRange | null
+): SchoolYearRange {
+  if (override && isWithinSchoolYear(dateISO, override)) {
+    return override;
+  }
+  return computeDefaultSchoolYear(dateISO);
+}
+
+// Defensive reason-6 count: only absent + materials provided + code 6 + in range.
+export function countReason6ForStudent(
+  sessions: Session[],
+  studentId: number,
+  range: SchoolYearRange
+): number {
+  return sessions.filter(
+    (s) =>
+      s.studentId === studentId &&
+      s.status === "absent" &&
+      s.materialsProvided === true &&
+      s.materialsReasonCode === 6 &&
+      isWithinSchoolYear(s.dateISO, range)
+  ).length;
+}
+
+// Replace a saved session by id (or append when new), so the reason-6 count is
+// computed from the effective post-save sessions — never "current + 1".
+export function applySessionToList(list: Session[], saved: Session): Session[] {
+  const exists = list.some((s) => s.id === saved.id);
+  return exists ? list.map((s) => (s.id === saved.id ? saved : s)) : [...list, saved];
+}
 
 export const studentsSeed: Student[] = [
   { id: 1, name: "陳小明" },
@@ -873,6 +958,168 @@ export function SessionCard({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export type AbsenceSubmitValues = {
+  reason: Reason;
+  note?: string;
+  materialsProvided: boolean;
+  materialsReasonCode: MaterialsReasonCode | null;
+};
+
+// Minimal shared body for the 請假 / 缺席 sheet. Owns the form fields and
+// validation only; the host page keeps its own save handler / API patch /
+// local fallback / state updates and reacts via onSubmit. Remount (via a key
+// keyed on the target session) to reset between sessions.
+export function AbsenceSheetBody({
+  initialReasonName = null,
+  initialNote = "",
+  initialMaterialsProvided = false,
+  initialMaterialsReasonCode = null,
+  onSubmit,
+  setToast,
+}: {
+  initialReasonName?: string | null;
+  initialNote?: string;
+  initialMaterialsProvided?: boolean;
+  initialMaterialsReasonCode?: MaterialsReasonCode | null;
+  onSubmit: (values: AbsenceSubmitValues) => void;
+  setToast: (text: string) => void;
+}) {
+  const isDark = React.useContext(ThemeContext);
+  const [note, setNote] = useState(initialNote);
+  // Backend reasons round-trip as a string (name) with id 0, so match the
+  // preset chip by name — matching by id would never pre-select on reopen.
+  const [reasonId, setReasonId] = useState<number | null>(
+    () => reasonsSeed.find((reason) => reason.name === initialReasonName)?.id ?? null
+  );
+  const [materialsProvided, setMaterialsProvided] = useState(initialMaterialsProvided);
+  const [materialsReasonCode, setMaterialsReasonCode] =
+    useState<MaterialsReasonCode | null>(initialMaterialsReasonCode);
+
+  function handleSubmit() {
+    const reason = reasonsSeed.find((r) => r.id === reasonId);
+    if (!reason) {
+      setToast("請先選擇學生的缺席原因");
+      return;
+    }
+    if (materialsProvided && materialsReasonCode == null) {
+      setToast("請選擇教材服務的申報原因");
+      return;
+    }
+    onSubmit({
+      reason,
+      note: note.trim() ? note : undefined,
+      materialsProvided,
+      materialsReasonCode: materialsProvided ? materialsReasonCode : null,
+    });
+  }
+
+  const chipBase =
+    "rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99]";
+  const chipIdle = isDark
+    ? "bg-[#1C1C1E] border-white/10 text-[#D1D1D6] hover:bg-[#2C2C2E]"
+    : "bg-[#F2F2F7] border-[#E5E5EA] text-slate-700 hover:bg-[#EDEDF3]";
+  const chipActive = isDark
+    ? "bg-emerald-900/20 border-emerald-900/50 text-emerald-400"
+    : "bg-emerald-50 border-emerald-200 text-emerald-700";
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className={`text-[12px] font-semibold ${isDark ? "text-[#8E8E93]" : "text-slate-500"}`}>
+          （可選）備註
+        </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="例如：已通知家長 / 交通延誤..."
+          className={`mt-2 w-full min-h-[92px] rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+            isDark
+              ? "bg-[#1C1C1E] border-white/10 text-[#F2F2F7] placeholder:text-[#8E8E93] focus:ring-white/20"
+              : "bg-white border-[#E5E5EA] text-slate-800 placeholder:text-slate-400 focus:ring-[#C7DAFF]"
+          }`}
+        />
+      </div>
+
+      <div>
+        <div className={`text-[12px] font-semibold ${isDark ? "text-[#8E8E93]" : "text-slate-500"}`}>
+          缺席原因
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {reasonsSeed.map((r) => {
+            const active = reasonId === r.id;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setReasonId(r.id)}
+                className={`${chipBase} ${active ? chipActive : chipIdle}`}
+              >
+                {r.name}
+                <span className={`ml-2 text-xs font-medium ${isDark ? "text-[#8E8E93]" : "text-slate-400"}`}>
+                  {r.code}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className={`text-[12px] font-semibold ${isDark ? "text-[#8E8E93]" : "text-slate-500"}`}>
+          教材服務（可選）
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            aria-pressed={materialsProvided}
+            onClick={() => setMaterialsProvided((v) => !v)}
+            className={`${chipBase} ${materialsProvided ? chipActive : chipIdle}`}
+          >
+            教材
+          </button>
+        </div>
+
+        {materialsProvided ? (
+          <>
+            <div className={`mt-3 text-[12px] font-semibold ${isDark ? "text-[#8E8E93]" : "text-slate-500"}`}>
+              教材申報原因
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {materialsReasonOptions.map((opt) => {
+                const active = materialsReasonCode === opt.code;
+                return (
+                  <button
+                    key={opt.code}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setMaterialsReasonCode(opt.code)}
+                    className={`${chipBase} ${active ? chipActive : chipIdle}`}
+                  >
+                    {opt.code} {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSubmit}
+        className={`w-full rounded-2xl px-4 py-3 text-sm font-bold transition active:scale-[0.99] ${
+          isDark
+            ? "bg-[#0A84FF] text-white hover:bg-[#0A84FF]/90"
+            : "bg-[#007AFF] text-white hover:bg-[#0A6CFF]"
+        }`}
+      >
+        完成缺席紀錄
+      </button>
     </div>
   );
 }

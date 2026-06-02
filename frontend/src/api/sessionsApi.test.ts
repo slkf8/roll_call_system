@@ -66,6 +66,8 @@ describe("sessionsApi", () => {
         makeupOfDateISO: undefined,
         makeupOfSessionId: undefined,
         scheduleRuleId: 101,
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
     ]);
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/api/sessions");
@@ -313,6 +315,38 @@ describe("sessionsApi", () => {
       }),
       expect.objectContaining({
         reason: undefined,
+      }),
+    ]);
+  });
+
+  it("defaults materials fields and parses provided materials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          sessionResponse({ id: 1 }),
+          sessionResponse({
+            id: 2,
+            status: "absent",
+            reason: "生病",
+            materialsProvided: true,
+            materialsReasonCode: 4,
+          }),
+        ],
+      }))
+    );
+
+    await expect(fetchSessions()).resolves.toEqual([
+      expect.objectContaining({
+        id: 1,
+        materialsProvided: false,
+        materialsReasonCode: null,
+      }),
+      expect.objectContaining({
+        id: 2,
+        materialsProvided: true,
+        materialsReasonCode: 4,
       }),
     ]);
   });

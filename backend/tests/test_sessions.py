@@ -474,3 +474,136 @@ def test_list_invalid_from_returns_422(client: TestClient):
     response = client.get("/api/sessions", params={"from": "20-05-2026"})
 
     assert response.status_code == 422
+
+
+def test_create_defaults_materials_to_false_null(client: TestClient):
+    student = create_student(client)
+    body = create_session(client, student_id=student["id"])
+
+    assert body["materialsProvided"] is False
+    assert body["materialsReasonCode"] is None
+
+
+def test_create_absent_with_materials(client: TestClient):
+    student = create_student(client)
+    body = client.post(
+        "/api/sessions",
+        json={
+            "studentId": student["id"],
+            "dateISO": "2026-05-20",
+            "start": "16:00",
+            "status": "absent",
+            "materialsProvided": True,
+            "materialsReasonCode": 4,
+        },
+    )
+    assert body.status_code == 201, body.text
+    payload = body.json()
+    assert payload["materialsProvided"] is True
+    assert payload["materialsReasonCode"] == 4
+
+
+def test_create_materials_provided_without_code_rejected(client: TestClient):
+    student = create_student(client)
+    response = client.post(
+        "/api/sessions",
+        json={
+            "studentId": student["id"],
+            "dateISO": "2026-05-20",
+            "start": "16:00",
+            "status": "absent",
+            "materialsProvided": True,
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_create_materials_on_non_absent_is_cleared(client: TestClient):
+    student = create_student(client)
+    response = client.post(
+        "/api/sessions",
+        json={
+            "studentId": student["id"],
+            "dateISO": "2026-05-20",
+            "start": "16:00",
+            "status": "present",
+            "materialsProvided": True,
+            "materialsReasonCode": 4,
+        },
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["materialsProvided"] is False
+    assert payload["materialsReasonCode"] is None
+
+
+def test_patch_status_to_present_clears_materials(client: TestClient):
+    student = create_student(client)
+    created = client.post(
+        "/api/sessions",
+        json={
+            "studentId": student["id"],
+            "dateISO": "2026-05-20",
+            "start": "16:00",
+            "status": "absent",
+            "materialsProvided": True,
+            "materialsReasonCode": 6,
+        },
+    ).json()
+    assert created["materialsProvided"] is True
+
+    patched = client.patch(
+        f"/api/sessions/{created['id']}",
+        json={"status": "present"},
+    )
+    assert patched.status_code == 200, patched.text
+    payload = patched.json()
+    assert payload["materialsProvided"] is False
+    assert payload["materialsReasonCode"] is None
+
+
+def test_patch_add_materials_to_existing_absent(client: TestClient):
+    student = create_student(client)
+    created = create_session(
+        client, student_id=student["id"], status="absent", reason="生病"
+    )
+    assert created["materialsProvided"] is False
+
+    patched = client.patch(
+        f"/api/sessions/{created['id']}",
+        json={"materialsProvided": True, "materialsReasonCode": 2},
+    )
+    assert patched.status_code == 200, patched.text
+    payload = patched.json()
+    assert payload["status"] == "absent"
+    assert payload["materialsProvided"] is True
+    assert payload["materialsReasonCode"] == 2
+
+
+def test_patch_materials_provided_without_code_rejected(client: TestClient):
+    student = create_student(client)
+    created = create_session(client, student_id=student["id"], status="absent")
+
+    response = client.patch(
+        f"/api/sessions/{created['id']}",
+        json={"materialsProvided": True},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_patch_materials_on_present_session_is_silently_cleared(client: TestClient):
+    student = create_student(client)
+    created = create_session(client, student_id=student["id"], status="present")
+    assert created["status"] == "present"
+
+    # Caller actively sends materials on a non-absent session: router must
+    # silently clear them (status governs), returning 200 — not 422.
+    patched = client.patch(
+        f"/api/sessions/{created['id']}",
+        json={"materialsProvided": True, "materialsReasonCode": 4},
+    )
+    assert patched.status_code == 200, patched.text
+    payload = patched.json()
+    assert payload["status"] == "present"
+    assert payload["materialsProvided"] is False
+    assert payload["materialsReasonCode"] is None

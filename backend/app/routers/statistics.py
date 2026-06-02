@@ -73,6 +73,7 @@ def get_monthly_statistics(
 
     student_rows: list[MonthlyStatisticsStudentRow] = []
     teacher_service_total = 0
+    materials_total = 0
 
     for student in students:
         student_present_sessions = [
@@ -90,7 +91,20 @@ def get_monthly_statistics(
             1 for session in student_present_sessions if session.kind == "extra"
         )
         total_count = regular_count + makeup_count + extra_count
-        teacher_service_total += total_count
+
+        # Materials service: counts only on absent sessions where materials were
+        # provided with a valid reason code. Adds to the teacher service total
+        # but never to student attendance.
+        materials_count = sum(
+            1
+            for session in monthly_sessions
+            if session.student_id == student.id
+            and session.status == "absent"
+            and bool(session.materials_provided)
+            and session.materials_reason_code in (1, 2, 3, 4, 5, 6)
+        )
+        teacher_service_total += total_count + materials_count
+        materials_total += materials_count
 
         student_rows.append(
             MonthlyStatisticsStudentRow(
@@ -103,6 +117,7 @@ def get_monthly_statistics(
                 makeupPresentCount=makeup_count,
                 extraPresentCount=extra_count,
                 totalPresentCount=total_count,
+                materialsCount=materials_count,
             )
         )
 
@@ -143,6 +158,7 @@ def get_monthly_statistics(
             cancelledCount=status_counts["cancelled"],
             scheduleRuleCount=schedule_rule_count,
             globalEventCount=global_event_count,
+            materialsCount=materials_total,
         ),
         students=student_rows,
         warnings=warnings,

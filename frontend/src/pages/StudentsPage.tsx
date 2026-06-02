@@ -524,6 +524,8 @@ export default function StudentsPage({
             durationMin: rule.durationMin,
             status: "pending",
             kind: "regular",
+            materialsProvided: false,
+            materialsReasonCode: null,
           },
         });
         nextId++;

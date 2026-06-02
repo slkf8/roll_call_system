@@ -10,6 +10,7 @@ export type MonthlyStatisticsSummary = {
   cancelledCount: number;
   scheduleRuleCount: number;
   globalEventCount: number;
+  materialsCount: number;
 };
 
 export type MonthlyStatisticsStudentRow = {
@@ -22,6 +23,7 @@ export type MonthlyStatisticsStudentRow = {
   makeupPresentCount: number;
   extraPresentCount: number;
   totalPresentCount: number;
+  materialsCount: number;
 };
 
 export type MonthlyStatisticsWarning = {
@@ -75,6 +77,7 @@ function parseSummary(value: unknown): MonthlyStatisticsSummary {
     cancelledCount: parseNumber(value.cancelledCount),
     scheduleRuleCount: parseNumber(value.scheduleRuleCount),
     globalEventCount: parseNumber(value.globalEventCount),
+    materialsCount: parseNumber(value.materialsCount),
   };
 }
 
@@ -94,6 +97,7 @@ function parseStudentRow(value: unknown): MonthlyStatisticsStudentRow {
     makeupPresentCount: parseNumber(value.makeupPresentCount),
     extraPresentCount: parseNumber(value.extraPresentCount),
     totalPresentCount: parseNumber(value.totalPresentCount),
+    materialsCount: parseNumber(value.materialsCount),
   };
 }
 

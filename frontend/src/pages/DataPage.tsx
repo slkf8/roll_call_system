@@ -17,13 +17,25 @@ import {
   IconChevronRight,
   IconFile,
   IOSSheet,
+  FieldRow,
   ThemeContext,
   ThemeToggle,
   pad2,
   parseISO,
   reasonsSeed,
   todayISO,
+  formatMaterialsBadge,
+  resolveSchoolYearRange,
+  isWithinSchoolYear,
+  countReason6ForStudent,
+  REASON6_PER_SCHOOL_YEAR_LIMIT,
 } from "../shared/appShared";
+import type { MaterialsReasonCode, SchoolYearRange } from "../shared/appShared";
+import {
+  readSchoolYearOverride,
+  writeSchoolYearOverride,
+  clearSchoolYearOverride,
+} from "../shared/schoolYearStorage";
 
 // 白名單：只顯示缺席 Bottom Sheet 提供的預設原因，排除歷史/自訂字串。
 // 單一事實來源 = reasonsSeed（新增「天氣」後自動納入）。
@@ -51,6 +63,7 @@ type StudentAttendanceRow = {
   makeupPresentCount: number;
   extraPresentCount: number;
   totalPresentCount: number;
+  materialsCount: number;
 };
 
 type TemplateColumnCandidate = {
@@ -595,6 +608,7 @@ function statisticsStudentRowToAttendanceRow(
     makeupPresentCount: row.makeupPresentCount,
     extraPresentCount: row.extraPresentCount,
     totalPresentCount: row.totalPresentCount,
+    materialsCount: row.materialsCount,
   };
 }
 
@@ -630,6 +644,14 @@ export default function DataPage({
   const [backendStatistics, setBackendStatistics] = useState<MonthlyStatistics | null>(null);
   const [isStatisticsBackendAvailable, setIsStatisticsBackendAvailable] = useState(false);
   const [statisticsError, setStatisticsError] = useState<string | null>(null);
+
+  // 原因 6 學年範圍 override（獨立 localStorage；範圍外回退 Sep–Aug 推算）。
+  const [schoolYearOverride, setSchoolYearOverride] = useState<SchoolYearRange | null>(
+    () => readSchoolYearOverride()
+  );
+  const [schoolYearSheetOpen, setSchoolYearSheetOpen] = useState(false);
+  const [syStartInput, setSyStartInput] = useState("");
+  const [syEndInput, setSyEndInput] = useState("");
 
   const monthRange = useMemo(() => getMonthRange(selectedDate), [selectedDate]);
   const monthLabel = formatMonthLabel(selectedDate);
@@ -700,18 +722,32 @@ export default function DataPage({
         (session) => session.kind === "extra"
       ).length;
 
+      // Materials service this month: absent + provided + valid reason code.
+      const materialsCount = monthlySessions.filter(
+        (session) =>
+          session.studentId === student.id &&
+          session.status === "absent" &&
+          session.materialsProvided === true &&
+          session.materialsReasonCode != null
+      ).length;
+
       return {
         student,
         regularPresentCount,
         makeupPresentCount,
         extraPresentCount,
         totalPresentCount: regularPresentCount + makeupPresentCount + extraPresentCount,
+        materialsCount,
       };
     });
   }, [students, monthlySessions]);
 
   const localTeacherServiceTotal = localAttendanceRows.reduce(
-    (total, row) => total + row.totalPresentCount,
+    (total, row) => total + row.totalPresentCount + row.materialsCount,
+    0
+  );
+  const localMaterialsTotal = localAttendanceRows.reduce(
+    (total, row) => total + row.materialsCount,
     0
   );
 
@@ -769,12 +805,74 @@ export default function DataPage({
             .length,
           scheduleRuleCount: studentScheduleRules.length,
           globalEventCount: globalEvents.length,
+          materialsCount: localMaterialsTotal,
         };
 
   const directServiceOptions = useMemo(
     () => uniqueDirectServiceOptions(columnCandidates, availableColumns),
     [columnCandidates, availableColumns]
   );
+
+  // 原因 6 學年範圍：override 套用於範圍內日期，否則以目標月份推算 Sep–Aug。
+  const schoolYearRange = useMemo(
+    () => resolveSchoolYearRange(monthRange.monthStartISO, schoolYearOverride),
+    [monthRange.monthStartISO, schoolYearOverride]
+  );
+
+  // 有合法 override，但目前月份落在其範圍外 → 已回退預設學年（資訊提示用）。
+  const schoolYearOverrideNotApplied =
+    !!schoolYearOverride &&
+    !isWithinSchoolYear(monthRange.monthStartISO, schoolYearOverride);
+
+  // 每位學生原因 6 在學年範圍內的次數（防禦性四條件，跨全部 sessions）。
+  const reason6CountByStudent = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const student of students) {
+      const count = countReason6ForStudent(sessions, student.id, schoolYearRange);
+      if (count > 0) map.set(student.id, count);
+    }
+    return map;
+  }, [students, sessions, schoolYearRange]);
+
+  const reason6OverLimitCount = useMemo(() => {
+    let n = 0;
+    for (const count of reason6CountByStudent.values()) {
+      if (count > REASON6_PER_SCHOOL_YEAR_LIMIT) n += 1;
+    }
+    return n;
+  }, [reason6CountByStudent]);
+
+  function openSchoolYearSheet() {
+    setSyStartInput(schoolYearRange.startISO);
+    setSyEndInput(schoolYearRange.endISO);
+    setSchoolYearSheetOpen(true);
+  }
+
+  function applySchoolYearOverride() {
+    if (!syStartInput || !syEndInput) {
+      setToast("請輸入完整的學年開始與結束日期");
+      return;
+    }
+    if (syStartInput > syEndInput) {
+      setToast("學年開始日期必須早於或等於結束日期");
+      return;
+    }
+    const range = { startISO: syStartInput, endISO: syEndInput };
+    if (!writeSchoolYearOverride(range)) {
+      setToast("學年範圍格式不正確，未套用");
+      return;
+    }
+    setSchoolYearOverride(range);
+    setSchoolYearSheetOpen(false);
+    setToast("已套用原因 6 統計學年");
+  }
+
+  function restoreSchoolYearDefault() {
+    clearSchoolYearOverride();
+    setSchoolYearOverride(null);
+    setSchoolYearSheetOpen(false);
+    setToast("已恢復為預設學年");
+  }
 
   useEffect(() => {
     if (!worksheetData) {
@@ -1100,7 +1198,8 @@ export default function DataPage({
                     {displaySummary.teacherServiceTotal}
                   </div>
                   <div className={`mt-3 text-[13px] leading-5 ${mutedTextClass}`}>
-                    由每位學生的 regular / makeup / extra 出席合計加總。
+                    正常出席 {displaySummary.teacherServiceTotal - displaySummary.materialsCount} · 教材{" "}
+                    {displaySummary.materialsCount}
                   </div>
                 </div>
               </div>
@@ -1119,6 +1218,43 @@ export default function DataPage({
                   </div>
                 ))}
               </div>
+            </div>
+          </section>
+
+          <section className={cardClass}>
+            <div className="p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-[13px] font-semibold">原因 6 統計學年</div>
+                  <div className={`mt-1 text-[13px] ${mutedTextClass}`}>
+                    {schoolYearRange.startISO} 至 {schoolYearRange.endISO}
+                    {schoolYearOverride ? "（手動）" : "（預設 9/1–8/31）"}
+                  </div>
+                  {schoolYearOverrideNotApplied ? (
+                    <div className={`mt-1 text-[12px] ${mutedTextClass}`}>
+                      目前月份不在自訂學年範圍內，已使用預設學年。
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className={softButtonClass}
+                  onClick={openSchoolYearSheet}
+                >
+                  調整
+                </button>
+              </div>
+              {reason6OverLimitCount > 0 ? (
+                <div
+                  className={`mt-3 rounded-2xl px-4 py-3 text-[13px] font-semibold ${
+                    isDark
+                      ? "bg-amber-900/20 text-amber-400"
+                      : "bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  ⚠ 原因 6 次數提醒：{reason6OverLimitCount} 名學生超過學年上限
+                </div>
+              ) : null}
             </div>
           </section>
 
@@ -1147,7 +1283,7 @@ export default function DataPage({
                 <table className="min-w-full border-separate border-spacing-0 text-left text-[13px]">
                   <thead>
                     <tr>
-                      {["學生", "生日", "學校", "狀態", "regular", "makeup", "extra", "合計"].map(
+                      {["學生", "生日", "學校", "狀態", "regular", "makeup", "extra", "教材", "合計"].map(
                         (label) => (
                           <th
                             key={label}
@@ -1185,6 +1321,21 @@ export default function DataPage({
                                   {expanded ? "▴" : "▾"}
                                 </span>
                                 {row.student.name}
+                                {(() => {
+                                  const r6 = reason6CountByStudent.get(row.student.id) ?? 0;
+                                  if (r6 <= REASON6_PER_SCHOOL_YEAR_LIMIT) return null;
+                                  return (
+                                    <span
+                                      className={`ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                        isDark
+                                          ? "bg-amber-900/20 text-amber-400"
+                                          : "bg-amber-50 text-amber-700"
+                                      }`}
+                                    >
+                                      原因 6 · {r6} 次 · 超額 {r6 - REASON6_PER_SCHOOL_YEAR_LIMIT} 次
+                                    </span>
+                                  );
+                                })()}
                               </span>
                             </td>
                             <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
@@ -1205,6 +1356,9 @@ export default function DataPage({
                             <td className={`border-b px-3 py-3 ${tableCellClass}`}>
                               {row.extraPresentCount}
                             </td>
+                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                              {row.materialsCount}
+                            </td>
                             <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
                               {row.totalPresentCount}
                             </td>
@@ -1212,7 +1366,7 @@ export default function DataPage({
                           {expanded ? (
                             <tr id={detailRowId}>
                               <td
-                                colSpan={8}
+                                colSpan={9}
                                 className={`border-b px-3 py-4 ${tableCellClass} ${
                                   isDark ? "bg-[#161618]" : "bg-[#FAFAFB]"
                                 }`}
@@ -1231,7 +1385,7 @@ export default function DataPage({
                                     <table className="min-w-full border-separate border-spacing-0 text-left text-[12.5px]">
                                       <thead>
                                         <tr>
-                                          {["日期", "開始時間", "時長", "kind", "status"].map(
+                                          {["日期", "開始時間", "時長", "kind", "status", "教材"].map(
                                             (label) => (
                                               <th
                                                 key={label}
@@ -1279,6 +1433,25 @@ export default function DataPage({
                                                   ? ` · ${session.reason.name}`
                                                   : ""}
                                               </span>
+                                            </td>
+                                            <td className={`border-b px-3 py-2 ${tableCellClass}`}>
+                                              {session.status === "absent" &&
+                                              session.materialsProvided &&
+                                              session.materialsReasonCode != null ? (
+                                                <span
+                                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                                    isDark
+                                                      ? "bg-emerald-900/20 text-emerald-400"
+                                                      : "bg-emerald-50 text-emerald-700"
+                                                  }`}
+                                                >
+                                                  {formatMaterialsBadge(
+                                                    session.materialsReasonCode as MaterialsReasonCode
+                                                  )}
+                                                </span>
+                                              ) : (
+                                                <span className={mutedTextClass}>—</span>
+                                              )}
                                             </td>
                                           </tr>
                                         ))}
@@ -1643,6 +1816,59 @@ export default function DataPage({
         <div className={`rounded-[20px] p-4 text-[13px] leading-6 ${isDark ? "bg-[#111214] text-[#D1D1D6]" : "bg-[#F2F2F7] text-slate-600"}`}>
           系統只會修改成功匹配學生在目標欄位的數字。未匹配與多重匹配的學生不會寫入。
           不會新增行、刪除行，亦不會修改其他月份或其他欄位。
+        </div>
+      </div>
+    </IOSSheet>
+
+    <IOSSheet
+      open={schoolYearSheetOpen}
+      title="原因 6 統計學年"
+      subtitle="僅用於原因 6 每學年度上限提醒"
+      leftAction={{ label: "取消", onClick: () => setSchoolYearSheetOpen(false) }}
+      onClose={() => setSchoolYearSheetOpen(false)}
+    >
+      <div className="space-y-3">
+        <FieldRow label="開始日期">
+          <input
+            type="date"
+            value={syStartInput}
+            onChange={(e) => setSyStartInput(e.target.value)}
+            className={`rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              isDark
+                ? "bg-[#1C1C1E] border-white/10 text-[#F2F2F7] focus:ring-white/20"
+                : "bg-white border-[#E5E5EA] text-slate-800 focus:ring-[#C7DAFF]"
+            }`}
+          />
+        </FieldRow>
+        <FieldRow label="結束日期">
+          <input
+            type="date"
+            value={syEndInput}
+            onChange={(e) => setSyEndInput(e.target.value)}
+            className={`rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              isDark
+                ? "bg-[#1C1C1E] border-white/10 text-[#F2F2F7] focus:ring-white/20"
+                : "bg-white border-[#E5E5EA] text-slate-800 focus:ring-[#C7DAFF]"
+            }`}
+          />
+        </FieldRow>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={applySchoolYearOverride}
+            className={`flex-1 rounded-2xl px-4 py-3 text-sm font-bold transition active:scale-[0.99] ${
+              isDark ? "bg-[#0A84FF] text-white" : "bg-[#007AFF] text-white"
+            }`}
+          >
+            套用
+          </button>
+          <button
+            type="button"
+            onClick={restoreSchoolYearDefault}
+            className={`flex-1 ${softButtonClass}`}
+          >
+            恢復預設
+          </button>
         </div>
       </div>
     </IOSSheet>

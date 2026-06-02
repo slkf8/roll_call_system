@@ -1,6 +1,16 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    text,
+)
 
 from app.database import Base
 
@@ -112,6 +122,18 @@ class AttendanceSession(Base):
         ForeignKey("student_schedule_rules.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Materials service: set only on absent sessions. Additive columns with no
+    # DB CHECK so new and upgraded databases behave identically; the invariants
+    # (provided=False -> code NULL; provided=True -> code in 1..6; status !=
+    # absent -> provided False + code NULL) are enforced at the schema/router
+    # layer instead.
+    materials_provided = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    materials_reason_code = Column(Integer, nullable=True)
     created_at = Column(
         DateTime,
         nullable=False,

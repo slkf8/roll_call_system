@@ -149,6 +149,18 @@ function normalizePersistedSession(
       : undefined,
     makeupOfSessionId:
       typeof session.makeupOfSessionId === "number" ? session.makeupOfSessionId : undefined,
+    // Materials: stable boolean + (null | 1–6); old payloads lacking the
+    // fields default safely and never keep undefined.
+    materialsProvided: session.materialsProvided === true,
+    materialsReasonCode:
+      session.materialsReasonCode === 1 ||
+      session.materialsReasonCode === 2 ||
+      session.materialsReasonCode === 3 ||
+      session.materialsReasonCode === 4 ||
+      session.materialsReasonCode === 5 ||
+      session.materialsReasonCode === 6
+        ? session.materialsReasonCode
+        : null,
   };
 }
 
@@ -183,7 +195,10 @@ function normalizePersistedRule(
   };
 }
 
-type SeedSessionConfig = Omit<Session, "student" | "studentId"> & {
+type SeedSessionConfig = Omit<
+  Session,
+  "student" | "studentId" | "materialsProvided" | "materialsReasonCode"
+> & {
   studentIndex: number;
 };
 
@@ -196,6 +211,8 @@ function createSeedSession(config: SeedSessionConfig): Session | null {
     ...session,
     studentId: student.id,
     student: toSessionStudent(student),
+    materialsProvided: false,
+    materialsReasonCode: null,
   };
 }
 

@@ -145,6 +145,7 @@ def test_empty_database_returns_zero_summary_and_empty_students(client: TestClie
         "cancelledCount": 0,
         "scheduleRuleCount": 0,
         "globalEventCount": 0,
+        "materialsCount": 0,
     }
     assert body["students"] == []
     assert body["warnings"] == []
@@ -327,3 +328,37 @@ def test_missing_month_returns_422(client: TestClient):
     response = client.get("/api/statistics/monthly")
 
     assert response.status_code == 422
+
+
+def test_materials_counts_in_teacher_total_not_attendance(client: TestClient):
+    student = create_student(client, name="陳小明")
+    # One present regular session -> attendance + teacher total.
+    create_session(
+        client, student_id=student["id"], date_iso="2026-11-03", status="present"
+    )
+    # Absent with materials (reason 4) -> teacher total + materialsCount only.
+    client.post(
+        "/api/sessions",
+        json={
+            "studentId": student["id"],
+            "dateISO": "2026-11-10",
+            "start": "16:00",
+            "status": "absent",
+            "materialsProvided": True,
+            "materialsReasonCode": 4,
+        },
+    )
+    # Absent without materials -> neither.
+    create_session(
+        client, student_id=student["id"], date_iso="2026-11-17", status="absent"
+    )
+
+    body = get_monthly(client, "2026-11")
+
+    assert body["summary"]["materialsCount"] == 1
+    assert body["summary"]["teacherServiceTotal"] == 2  # 1 present + 1 materials
+
+    row = next(r for r in body["students"] if r["studentName"] == "陳小明")
+    assert row["regularPresentCount"] == 1
+    assert row["totalPresentCount"] == 1  # attendance excludes materials
+    assert row["materialsCount"] == 1

@@ -1,4 +1,4 @@
-import type { Reason, Session, Status } from "../shared/appShared";
+import type { MaterialsReasonCode, Reason, Session, Status } from "../shared/appShared";
 
 
 import { API_BASE_URL } from "../config";
@@ -26,6 +26,8 @@ export type SessionCreatePayload = {
   makeupOfDateISO?: string | null;
   makeupOfSessionId?: number | null;
   scheduleRuleId?: number | null;
+  materialsProvided?: boolean;
+  materialsReasonCode?: MaterialsReasonCode | null;
 };
 
 export type SessionUpdatePayload = {
@@ -40,6 +42,8 @@ export type SessionUpdatePayload = {
   makeupOfDateISO?: string | null;
   makeupOfSessionId?: number | null;
   scheduleRuleId?: number | null;
+  materialsProvided?: boolean;
+  materialsReasonCode?: MaterialsReasonCode | null;
 };
 
 export type DeleteSessionResult = {
@@ -72,6 +76,15 @@ function parseKind(value: unknown): Session["kind"] {
     return value;
   }
 
+  throw new Error("Invalid session response");
+}
+
+
+function parseMaterialsReasonCode(value: unknown): MaterialsReasonCode | null {
+  if (value === null || value === undefined) return null;
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5 || value === 6) {
+    return value;
+  }
   throw new Error("Invalid session response");
 }
 
@@ -143,6 +156,10 @@ function parseSession(value: unknown): ApiSession {
       typeof value.makeupOfSessionId === "number" ? value.makeupOfSessionId : undefined,
     scheduleRuleId:
       typeof value.scheduleRuleId === "number" ? value.scheduleRuleId : undefined,
+    // Backward compatible: older responses without materials fields default to
+    // a stable boolean + null (never undefined).
+    materialsProvided: value.materialsProvided === true,
+    materialsReasonCode: parseMaterialsReasonCode(value.materialsReasonCode),
   };
 
   if (value.note !== null && value.note !== undefined && typeof value.note !== "string") {

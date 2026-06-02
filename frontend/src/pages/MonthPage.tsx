@@ -16,6 +16,7 @@ import type {
   Session,
   GlobalEvent,
   ClosureReason,
+  AbsenceSubmitValues,
   StudentProfile,
 } from "../shared/appShared";
 import {
@@ -36,14 +37,19 @@ import {
   getNextSessionId,
   getSessionStudentName,
   getConflictCandidates,
-  reasonsSeed,
   closureReasonsSeed,
   endTime,
   addMinutes,
   isSessionCovered,
   ThemeToggle,
   HeaderBadge,
+  AbsenceSheetBody,
+  REASON6_PER_SCHOOL_YEAR_LIMIT,
+  resolveSchoolYearRange,
+  countReason6ForStudent,
+  applySessionToList,
 } from "../shared/appShared";
+import { readSchoolYearOverride } from "../shared/schoolYearStorage";
 
 // ==========================================
 // 本地 Types
@@ -238,8 +244,6 @@ export default function MonthPage({
 
 
   // --- 新增的狀態 (與 TodayPage 對齊) ---
-  const [absentNote, setAbsentNote] = useState("");
-
   const absentTarget = useMemo(
     () => safeSessions.find((s) => s.id === sheetAbsentFor) ?? null,
     [safeSessions, sheetAbsentFor]
@@ -352,6 +356,12 @@ const calculateDayConflicts = (
     if ("note" in extraData) {
       payload.note = extraData.note || null;
     }
+    if ("materialsProvided" in extraData) {
+      payload.materialsProvided = !!extraData.materialsProvided;
+    }
+    if ("materialsReasonCode" in extraData) {
+      payload.materialsReasonCode = extraData.materialsReasonCode ?? null;
+    }
 
     return payload;
   }
@@ -381,7 +391,49 @@ const calculateDayConflicts = (
 
   function openAbsent(id: string | number) {
     setSheetAbsentFor(id);
-    setAbsentNote("");
+  }
+
+  // Reason-6 over-limit warning from the effective post-save sessions
+  // (replace-by-id, never current+1); otherwise the normal absence toast.
+  function buildAbsenceToast(saved: Session): string {
+    const base = `${getSessionStudentName(saved)} ${saved.start} 缺席：${saved.reason?.name ?? ""}`;
+    if (
+      saved.status === "absent" &&
+      saved.materialsProvided === true &&
+      saved.materialsReasonCode === 6 &&
+      saved.studentId != null
+    ) {
+      const range = resolveSchoolYearRange(saved.dateISO, readSchoolYearOverride());
+      const effective = applySessionToList(safeSessions, saved);
+      const count = countReason6ForStudent(effective, saved.studentId, range);
+      if (count > REASON6_PER_SCHOOL_YEAR_LIMIT) {
+        return `原因 6 已超過每學年度 ${REASON6_PER_SCHOOL_YEAR_LIMIT} 次上限，目前為第 ${count} 次。紀錄仍已儲存，請確認申報資料。`;
+      }
+    }
+    return base;
+  }
+
+  function saveAbsence(values: AbsenceSubmitValues) {
+    if (!absentTarget) return;
+    const target = absentTarget;
+    void handleMarkStatus(target.id, "absent", {
+      reason: values.reason,
+      note: values.note,
+      materialsProvided: values.materialsProvided,
+      materialsReasonCode: values.materialsReasonCode,
+    }).then((ok) => {
+      if (!ok) return;
+      const saved: Session = {
+        ...target,
+        status: "absent",
+        reason: values.reason,
+        note: values.note,
+        materialsProvided: values.materialsProvided,
+        materialsReasonCode: values.materialsReasonCode,
+      };
+      setToast(buildAbsenceToast(saved));
+      setSheetAbsentFor(null);
+    });
   }
 
   function openEditFromMenu(session: Session) {
@@ -521,6 +573,8 @@ const calculateDayConflicts = (
         kind: isMakeup ? "makeup" : "extra",
         makeupOfDateISO: isMakeup ? sheetMakeupFor.sourceDateISO : undefined,
         makeupOfSessionId: isMakeup ? sheetMakeupFor.sourceSessionId : undefined,
+        materialsProvided: false,
+        materialsReasonCode: null,
       };
 
       const nextSessions = [...safePrev, newSession];
@@ -1541,6 +1595,8 @@ const handleBatchClearHoliday = async () => {
                               void handleMarkStatus(session.id, "present", {
                                 reason: undefined,
                                 note: undefined,
+                                materialsProvided: false,
+                                materialsReasonCode: null,
                               });
                             }}
                             onAbsent={() => {
@@ -1558,6 +1614,8 @@ const handleBatchClearHoliday = async () => {
                               void handleMarkStatus(session.id, "pending", {
                                 reason: undefined,
                                 note: undefined,
+                                materialsProvided: false,
+                                materialsReasonCode: null,
                               });
                             }}
                             onOpenMenu={() =>
@@ -1600,7 +1658,10 @@ const handleBatchClearHoliday = async () => {
                                   const nextStatus: Session["status"] =
                                     session.status === "cancelled" ? "pending" : "cancelled";
 
-                                  void handleMarkStatus(session.id, nextStatus).then((ok) => {
+                                  void handleMarkStatus(session.id, nextStatus, {
+                                    materialsProvided: false,
+                                    materialsReasonCode: null,
+                                  }).then((ok) => {
                                     if (!ok) return;
                                     setToast(
                                       nextStatus === "cancelled"
@@ -1840,52 +1901,15 @@ const handleBatchClearHoliday = async () => {
         onClose={() => setSheetAbsentFor(null)}
         leftAction={{ label: "取消", onClick: () => setSheetAbsentFor(null) }}
       >
-        <div className="space-y-4">
-          <div>
-            <div className={`text-[12px] font-semibold ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>（可選）備註</div>
-            <textarea
-              value={absentNote}
-              onChange={(e) => setAbsentNote(e.target.value)}
-              placeholder="例如：已通知家長 / 交通延誤..."
-              className={`mt-2 w-full min-h-[92px] rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
-                isDark
-                  ? 'bg-[#1C1C1E] border-white/10 text-[#F2F2F7] placeholder:text-[#8E8E93] focus:ring-white/20'
-                  : 'bg-white border-[#E5E5EA] text-slate-800 placeholder:text-slate-400 focus:ring-[#C7DAFF]'
-              }`}
-            />
-          </div>
-
-          <div>
-            <div className={`text-[12px] font-semibold ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>缺席原因（點選即完成記錄）</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {reasonsSeed.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => {
-                    if (!absentTarget) return;
-                    void handleMarkStatus(absentTarget.id, "absent", {
-                      reason: r,
-                      note: absentNote || undefined,
-                    }).then((ok) => {
-                      if (!ok) return;
-                      setToast(`${getSessionStudentName(absentTarget)} ${absentTarget.start} 缺席：${r.name}`);
-                      setSheetAbsentFor(null);
-                    });
-                  }}
-                  className={`rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
-                    isDark
-                      ? 'bg-[#1C1C1E] border-white/10 text-[#D1D1D6] hover:bg-[#2C2C2E]'
-                      : 'bg-[#F2F2F7] border-[#E5E5EA] text-slate-700 hover:bg-[#EDEDF3]'
-                  }`}
-                >
-                  {r.name}
-                  <span className={`ml-2 text-xs font-medium ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{r.code}</span>
-                </button>
-              ))}
-            </div>
-            <div className={`mt-2 text-[12px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>補課/加課請到每堂右側「…」選單操作。</div>
-          </div>
-        </div>
+        <AbsenceSheetBody
+          key={absentTarget ? absentTarget.id : "none"}
+          initialReasonName={absentTarget?.reason?.name ?? null}
+          initialNote={absentTarget?.note ?? ""}
+          initialMaterialsProvided={absentTarget?.materialsProvided ?? false}
+          initialMaterialsReasonCode={absentTarget?.materialsReasonCode ?? null}
+          onSubmit={saveAbsence}
+          setToast={setToast}
+        />
       </IOSSheet>
 
       {sheetEditFor && (

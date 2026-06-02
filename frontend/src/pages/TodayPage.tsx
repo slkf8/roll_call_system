@@ -12,6 +12,8 @@ import type {
   GlobalEvent,
   Reason,
   ClosureReason,
+  MaterialsReasonCode,
+  AbsenceSubmitValues,
   StudentProfile,
 } from "../shared/appShared";
 import {
@@ -22,7 +24,6 @@ import {
   IconChevronRight,
   IconBan,
   IconPlus,
-  reasonsSeed,
   closureReasonsSeed,
   todayISO,
   addDaysISO,
@@ -46,7 +47,13 @@ import {
   FieldRow,
   DurationInput,
   Menu,
+  AbsenceSheetBody,
+  REASON6_PER_SCHOOL_YEAR_LIMIT,
+  resolveSchoolYearRange,
+  countReason6ForStudent,
+  applySessionToList,
 } from "../shared/appShared";
+import { readSchoolYearOverride } from "../shared/schoolYearStorage";
 
 export interface TodayPageProps {
   setTheme: Dispatch<SetStateAction<"light" | "dark">>;
@@ -145,7 +152,6 @@ export default function TodayPage({
   const [absentOpen, setAbsentOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const selected = useMemo(() => sessions.find((x) => x.id === selectedId) ?? null, [sessions, selectedId]);
-  const [absentNote, setAbsentNote] = useState<string>("");
 
   const [makeupOpen, setMakeupOpen] = useState(false);
   const [mkDate, setMkDate] = useState<string>(() => selectedDate);
@@ -180,8 +186,7 @@ export default function TodayPage({
     setGlobalSheetOpen(false); 
 
     setSelectedId(null);
-    setAbsentNote(""); 
-    setCreateDate(selectedDate); 
+    setCreateDate(selectedDate);
   }, [selectedDate]);
 
   function openGlobalSheet() {
@@ -303,6 +308,8 @@ export default function TodayPage({
     status?: Session["status"];
     reason?: Reason | string | null;
     note?: string | null;
+    materialsProvided?: boolean;
+    materialsReasonCode?: MaterialsReasonCode | null;
   };
 
   function toBackendAttendancePatch(patch: AttendancePatch): SessionUpdatePayload {
@@ -320,6 +327,12 @@ export default function TodayPage({
     if ("note" in patch) {
       payload.note = patch.note || null;
     }
+    if ("materialsProvided" in patch) {
+      payload.materialsProvided = !!patch.materialsProvided;
+    }
+    if ("materialsReasonCode" in patch) {
+      payload.materialsReasonCode = patch.materialsReasonCode ?? null;
+    }
 
     return payload;
   }
@@ -331,18 +344,29 @@ export default function TodayPage({
         ? { reason: typeof patch.reason === "string" || patch.reason == null ? undefined : patch.reason }
         : {}),
       ...("note" in patch ? { note: patch.note || undefined } : {}),
+      ...("materialsProvided" in patch
+        ? { materialsProvided: !!patch.materialsProvided }
+        : {}),
+      ...("materialsReasonCode" in patch
+        ? { materialsReasonCode: patch.materialsReasonCode ?? null }
+        : {}),
     };
   }
 
   async function updateAttendanceSession(
     session: Session,
     patch: AttendancePatch,
-    successToast: string,
+    successToast: string | ((saved: Session) => string),
     onSuccess?: () => void
   ) {
+    const resolveToast = (saved: Session) =>
+      typeof successToast === "function" ? successToast(saved) : successToast;
+
     if (!isSessionsBackendAvailable) {
-      patchSession(session.id, toLocalAttendancePatch(patch));
-      setToast(successToast);
+      const localPatch = toLocalAttendancePatch(patch);
+      const saved = { ...session, ...localPatch } as Session;
+      patchSession(session.id, localPatch);
+      setToast(resolveToast(saved));
       onSuccess?.();
       return;
     }
@@ -350,12 +374,33 @@ export default function TodayPage({
     try {
       const updated = await updateSession(session.id, toBackendAttendancePatch(patch));
       setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setToast(successToast);
+      setToast(resolveToast(updated));
       onSuccess?.();
     } catch (error) {
       console.warn("Backend session update failed", error);
       setToast("點名更新失敗，請確認後端是否正常");
     }
+  }
+
+  // Reason-6 over-limit is a non-blocking warning computed from the effective
+  // post-save sessions (replace-by-id, never current+1). Falls back to the
+  // normal absence toast when not over the per-school-year limit.
+  function buildAbsenceToast(saved: Session): string {
+    const base = `${getSessionStudentName(saved)} ${saved.start} 缺席：${saved.reason?.name ?? ""}`;
+    if (
+      saved.status === "absent" &&
+      saved.materialsProvided === true &&
+      saved.materialsReasonCode === 6 &&
+      saved.studentId != null
+    ) {
+      const range = resolveSchoolYearRange(saved.dateISO, readSchoolYearOverride());
+      const effective = applySessionToList(sessions, saved);
+      const count = countReason6ForStudent(effective, saved.studentId, range);
+      if (count > REASON6_PER_SCHOOL_YEAR_LIMIT) {
+        return `原因 6 已超過每學年度 ${REASON6_PER_SCHOOL_YEAR_LIMIT} 次上限，目前為第 ${count} 次。紀錄仍已儲存，請確認申報資料。`;
+      }
+    }
+    return base;
   }
 
   function requestDelete(id: number) {
@@ -398,16 +443,21 @@ export default function TodayPage({
 
   function openAbsent(id: number) {
     setSelectedId(id);
-    setAbsentNote("");
     setAbsentOpen(true);
   }
 
-  function saveAbsentByReason(reason: Reason) {
+  function saveAbsence(values: AbsenceSubmitValues) {
     if (!selected) return;
     void updateAttendanceSession(
       selected,
-      { status: "absent", reason, note: absentNote || null },
-      `${getSessionStudentName(selected)} ${selected.start} 缺席：${reason.name}`,
+      {
+        status: "absent",
+        reason: values.reason,
+        note: values.note ?? null,
+        materialsProvided: values.materialsProvided,
+        materialsReasonCode: values.materialsReasonCode,
+      },
+      (saved) => buildAbsenceToast(saved),
       () => setAbsentOpen(false)
     );
   }
@@ -473,6 +523,8 @@ export default function TodayPage({
       kind: mkPurpose === "makeup" ? "makeup" : "extra",
       makeupOfDateISO: mkPurpose === "makeup" ? selected.dateISO : undefined,
       makeupOfSessionId: mkPurpose === "makeup" ? selected.id : undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
 
     const candidates = getConflictCandidates(sessions, mkDate, globalEvents);
@@ -608,6 +660,8 @@ export default function TodayPage({
       durationMin: clamped,
       status: "pending",
       kind: "extra",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
 
     const candidates = getConflictCandidates(sessions, createDate, globalEvents);
@@ -847,7 +901,7 @@ export default function TodayPage({
                         }
                         void updateAttendanceSession(
                           s,
-                          { status: "present", reason: null, note: null },
+                          { status: "present", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
                           `${getSessionStudentName(s)} ${s.start} 已到`
                         );
                       }}
@@ -865,7 +919,7 @@ export default function TodayPage({
                         }
                         void updateAttendanceSession(
                           s,
-                          { status: "pending", reason: null, note: null },
+                          { status: "pending", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
                           "已撤銷，回到未點名"
                         );
                       }}
@@ -914,6 +968,8 @@ export default function TodayPage({
                                 status: s.status === "cancelled" ? "pending" : "cancelled",
                                 reason: null,
                                 note: null,
+                                materialsProvided: false,
+                                materialsReasonCode: null,
                               },
                               s.status === "cancelled" ? "已取消停課" : "已標記停課"
                             );
@@ -946,7 +1002,7 @@ export default function TodayPage({
                         }
                         void updateAttendanceSession(
                           s,
-                          { status: "present", reason: null, note: null },
+                          { status: "present", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
                           `${getSessionStudentName(s)} ${s.start} 已到`
                         );
                       }}
@@ -964,7 +1020,7 @@ export default function TodayPage({
                         }
                         void updateAttendanceSession(
                           s,
-                          { status: "pending", reason: null, note: null },
+                          { status: "pending", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
                           "已撤銷，回到未點名"
                         );
                       }}
@@ -1013,6 +1069,8 @@ export default function TodayPage({
                                 status: s.status === "cancelled" ? "pending" : "cancelled",
                                 reason: null,
                                 note: null,
+                                materialsProvided: false,
+                                materialsReasonCode: null,
                               },
                               s.status === "cancelled" ? "已取消停課" : "已標記停課"
                             );
@@ -1043,38 +1101,15 @@ export default function TodayPage({
         onClose={() => setAbsentOpen(false)}
         leftAction={{ label: "取消", onClick: () => setAbsentOpen(false) }}
       >
-        <div className="space-y-4">
-          <div>
-            <div className={`text-[12px] font-semibold ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>（可選）備註</div>
-            <textarea
-              value={absentNote}
-              onChange={(e) => setAbsentNote(e.target.value)}
-              placeholder="例如：已通知家長 / 交通延誤..."
-              className={`mt-2 w-full min-h-[92px] rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
-                isDark ? 'bg-[#1C1C1E] border-white/10 text-[#F2F2F7] placeholder:text-[#8E8E93] focus:ring-white/20' : 'bg-white border-[#E5E5EA] text-slate-800 placeholder:text-slate-400 focus:ring-[#C7DAFF]'
-              }`}
-            />
-          </div>
-
-          <div>
-            <div className={`text-[12px] font-semibold ${isDark ? 'text-[#8E8E93]' : 'text-slate-500'}`}>缺席原因（點選即完成記錄）</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {reasonsSeed.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => saveAbsentByReason(r)}
-                  className={`rounded-2xl border px-3 py-2 text-sm font-semibold transition active:scale-[0.99] ${
-                    isDark ? 'bg-[#1C1C1E] border-white/10 text-[#D1D1D6] hover:bg-[#2C2C2E]' : 'bg-[#F2F2F7] border-[#E5E5EA] text-slate-700 hover:bg-[#EDEDF3]'
-                  }`}
-                >
-                  {r.name}
-                  <span className={`ml-2 text-xs font-medium ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>{r.code}</span>
-                </button>
-              ))}
-            </div>
-            <div className={`mt-2 text-[12px] ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>補課/加課請到每堂右側「…」選單操作。</div>
-          </div>
-        </div>
+        <AbsenceSheetBody
+          key={selected ? selected.id : "none"}
+          initialReasonName={selected?.reason?.name ?? null}
+          initialNote={selected?.note ?? ""}
+          initialMaterialsProvided={selected?.materialsProvided ?? false}
+          initialMaterialsReasonCode={selected?.materialsReasonCode ?? null}
+          onSubmit={saveAbsence}
+          setToast={setToast}
+        />
       </IOSSheet>
 
       <IOSSheet

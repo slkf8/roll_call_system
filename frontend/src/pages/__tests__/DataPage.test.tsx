@@ -50,6 +50,7 @@ function makeMonthlyStatistics(overrides: Partial<MonthlyStatistics> = {}): Mont
       cancelledCount: 5,
       scheduleRuleCount: 3,
       globalEventCount: 2,
+      materialsCount: 0,
     },
     students: [
       {
@@ -62,6 +63,7 @@ function makeMonthlyStatistics(overrides: Partial<MonthlyStatistics> = {}): Mont
         makeupPresentCount: 2,
         extraPresentCount: 1,
         totalPresentCount: 13,
+        materialsCount: 0,
       },
     ],
     warnings: [],
@@ -116,6 +118,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 2,
@@ -126,6 +130,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 3,
@@ -136,6 +142,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "makeup",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 4,
@@ -146,6 +154,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "extra",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 5,
@@ -156,6 +166,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "absent",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 6,
@@ -166,6 +178,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 7,
@@ -176,6 +190,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 8,
@@ -186,6 +202,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 9,
@@ -196,6 +214,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "present",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
   ];
 }
@@ -469,6 +489,22 @@ function getSelect(label: string) {
   return screen.getByLabelText(label) as HTMLSelectElement;
 }
 
+const SCHOOL_YEAR_KEY = "rollcall-reason6-schoolyear";
+
+// In-memory localStorage so override-display tests are deterministic regardless
+// of the jsdom storage implementation. Must be installed before render (DataPage
+// reads the override in a useState initializer).
+function installLocalStorage(initial: Record<string, string> = {}) {
+  const store = new Map<string, string>(Object.entries(initial));
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  });
+  return store;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchMonthlyStatistics).mockRejectedValue(new Error("statistics unavailable"));
@@ -479,6 +515,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("DataPage", () => {
@@ -557,6 +594,7 @@ describe("DataPage", () => {
           cancelledCount: 0,
           scheduleRuleCount: 0,
           globalEventCount: 0,
+          materialsCount: 0,
         },
         students: [],
       })
@@ -593,13 +631,14 @@ describe("DataPage", () => {
     expect(within(getRowByCell(section, "陳小明")).getByText("2")).toBeInTheDocument();
     expect(within(getRowByCell(section, "陳小明")).getByText("4")).toBeInTheDocument();
 
+    // 新增「教材」欄（此資料集皆為 0），每列多一個 "0" 儲存格。
     const leeRow = getRowByCell(section, "李小欣");
     expect(within(leeRow).getAllByText("1")).toHaveLength(2);
-    expect(within(leeRow).getAllByText("0")).toHaveLength(2);
+    expect(within(leeRow).getAllByText("0")).toHaveLength(3);
 
     const wongRow = getRowByCell(section, "王家朗");
     expect(within(wongRow).getAllByText("1")).toHaveLength(2);
-    expect(within(wongRow).getAllByText("0")).toHaveLength(2);
+    expect(within(wongRow).getAllByText("0")).toHaveLength(3);
   });
 
   it("reads a synthetic template and detects worksheet and columns", async () => {
@@ -1037,6 +1076,8 @@ describe("DataPage", () => {
         kind: "regular",
         reason: { id: 6, name: "天氣", code: "WEA" },
         note: "私密備註",
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
     ];
     const { user } = renderDataPage({
@@ -1069,6 +1110,8 @@ describe("DataPage", () => {
         kind: "regular",
         reason: { id: 0, name: "自訂原因文字", code: "BACKEND_REASON" },
         note: "私密備註",
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
     ];
     const { user } = renderDataPage({
@@ -1083,5 +1126,185 @@ describe("DataPage", () => {
     expect(screen.getByText("缺席")).toBeInTheDocument();
     expect(screen.queryByText(/自訂原因文字/)).not.toBeInTheDocument();
     expect(screen.queryByText(/私密備註/)).not.toBeInTheDocument();
+  });
+
+  it("shows 正常出席 X · 教材 Y subtitle on the teacher-service card", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(
+      makeMonthlyStatistics({
+        summary: {
+          teacherServiceTotal: 7,
+          monthlySessionCount: 99,
+          presentCount: 77,
+          absentCount: 8,
+          pendingCount: 6,
+          cancelledCount: 5,
+          scheduleRuleCount: 3,
+          globalEventCount: 2,
+          materialsCount: 2,
+        },
+      })
+    );
+
+    renderDataPage();
+
+    await waitFor(() =>
+      expect(getValueNearLabel("老師服務總次數").getByText("7")).toBeInTheDocument()
+    );
+    const card = screen.getByText("老師服務總次數").parentElement as HTMLElement;
+    expect(card.textContent).toContain("正常出席 5");
+    expect(card.textContent).toContain("教材 2");
+  });
+
+  it("renders the 教材 column without adding it to the 合計", async () => {
+    vi.mocked(fetchMonthlyStatistics).mockResolvedValue(
+      makeMonthlyStatistics({
+        students: [
+          {
+            studentId: 101,
+            studentName: "教材統計學生",
+            birthday: "2014-04-05",
+            school: "後端學校",
+            status: "active",
+            regularPresentCount: 5,
+            makeupPresentCount: 1,
+            extraPresentCount: 0,
+            totalPresentCount: 6,
+            materialsCount: 2,
+          },
+        ],
+      })
+    );
+
+    renderDataPage();
+
+    const section = getSectionByHeading("每學生出席次數");
+    await waitFor(() =>
+      expect(within(section).getByText("教材統計學生")).toBeInTheDocument()
+    );
+    const row = getRowByCell(section, "教材統計學生");
+    const cells = row.querySelectorAll("td");
+    // name, birthday, school, status, regular, makeup, extra, 教材, 合計
+    expect(cells[7].textContent).toBe("2"); // 教材
+    expect(cells[8].textContent).toBe("6"); // 合計 = regular+makeup+extra（不含教材）
+  });
+
+  it("shows the materials badge in the detail panel, and — when none", async () => {
+    const studentsOnly: StudentProfile[] = [
+      { id: 1, name: "陳小明", birthday: "2012-03-08", school: "培正中學", status: "active" },
+    ];
+    const sessions: Session[] = [
+      {
+        id: 60,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-11-12",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        materialsProvided: true,
+        materialsReasonCode: 4,
+      },
+      {
+        id: 61,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-11-20",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        materialsProvided: false,
+        materialsReasonCode: null,
+      },
+    ];
+    const { user } = renderDataPage({
+      initialStudents: studentsOnly,
+      initialSessions: sessions,
+    });
+    const section = getSectionByHeading("每學生出席次數");
+    await user.click(getRowByCell(section, "陳小明"));
+
+    expect(screen.getByText("教材 · 4 生病")).toBeInTheDocument();
+    // 無教材的 session 在教材欄顯示 —。
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("shows the reason-6 over-limit page warning and per-student pill", () => {
+    const studentsOnly: StudentProfile[] = [
+      { id: 1, name: "陳小明", birthday: "2012-03-08", school: "培正中學", status: "active" },
+    ];
+    const reason6 = (id: number, dateISO: string): Session => ({
+      id,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO,
+      start: "10:00",
+      durationMin: 60,
+      status: "absent",
+      kind: "regular",
+      materialsProvided: true,
+      materialsReasonCode: 6,
+    });
+    renderDataPage({
+      initialStudents: studentsOnly,
+      // 目標月份 2026-11 → 學年 2026-09..2027-08；四筆皆落在此範圍內。
+      initialSessions: [
+        reason6(70, "2026-10-01"),
+        reason6(71, "2026-11-01"),
+        reason6(72, "2026-12-01"),
+        reason6(73, "2027-01-01"),
+      ],
+    });
+
+    const schoolYearSection = getSectionByHeading("原因 6 統計學年");
+    expect(schoolYearSection.textContent).toContain("原因 6 次數提醒：1 名學生超過學年上限");
+
+    const tableSection = getSectionByHeading("每學生出席次數");
+    const row = getRowByCell(tableSection, "陳小明");
+    expect(row.textContent).toContain("原因 6 · 4 次 · 超額 1 次");
+  });
+
+  it("applies an in-range school-year override and hides the not-applied note", () => {
+    installLocalStorage({
+      [SCHOOL_YEAR_KEY]: JSON.stringify({ startISO: "2026-01-01", endISO: "2026-12-31" }),
+    });
+    renderDataPage();
+
+    const section = getSectionByHeading("原因 6 統計學年");
+    expect(section.textContent).toContain("2026-01-01 至 2026-12-31");
+    expect(section.textContent).not.toContain("目前月份不在自訂學年範圍內");
+  });
+
+  it("falls back to the default school year and shows the note when the month is outside the override", () => {
+    installLocalStorage({
+      [SCHOOL_YEAR_KEY]: JSON.stringify({ startISO: "2025-01-01", endISO: "2025-12-31" }),
+    });
+    renderDataPage();
+
+    const section = getSectionByHeading("原因 6 統計學年");
+    // 目標月份 2026-11 → 預設學年 2026-09..2027-08。
+    expect(section.textContent).toContain("2026-09-01 至 2027-08-31");
+    expect(section.textContent).toContain("目前月份不在自訂學年範圍內，已使用預設學年。");
+  });
+
+  it("restores the default school year when 恢復預設 is clicked", async () => {
+    const store = installLocalStorage({
+      [SCHOOL_YEAR_KEY]: JSON.stringify({ startISO: "2025-01-01", endISO: "2025-12-31" }),
+    });
+    const { user } = renderDataPage();
+
+    const section = getSectionByHeading("原因 6 統計學年");
+    expect(section.textContent).toContain("目前月份不在自訂學年範圍內");
+
+    await user.click(within(section).getByRole("button", { name: "調整" }));
+    await user.click(screen.getByRole("button", { name: "恢復預設" }));
+
+    await waitFor(() => {
+      const after = getSectionByHeading("原因 6 統計學年");
+      expect(after.textContent).toContain("（預設 9/1–8/31）");
+      expect(after.textContent).not.toContain("目前月份不在自訂學年範圍內");
+    });
+    expect(store.has(SCHOOL_YEAR_KEY)).toBe(false);
   });
 });

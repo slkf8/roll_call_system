@@ -43,6 +43,8 @@ const baseSession: Session = {
   durationMin: 60,
   status: "pending",
   kind: "regular",
+  materialsProvided: false,
+  materialsReasonCode: null,
 };
 
 const linkedMakeupSession: Session = {
@@ -56,6 +58,8 @@ const linkedMakeupSession: Session = {
   kind: "makeup",
   makeupOfDateISO: "2026-06-01",
   makeupOfSessionId: 10,
+  materialsProvided: false,
+  materialsReasonCode: null,
 };
 
 
@@ -136,6 +140,8 @@ describe("TodayPage backend session status updates", () => {
         status: "present",
         reason: null,
         note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       expect(screen.getByText("已到")).toBeInTheDocument();
     });
@@ -155,6 +161,8 @@ describe("TodayPage backend session status updates", () => {
         status: "present",
         reason: null,
         note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       expect(setToast).toHaveBeenCalledWith("點名更新失敗，請確認後端是否正常");
     });
@@ -186,13 +194,16 @@ describe("TodayPage backend session status updates", () => {
     await user.click(screen.getByLabelText("記錄缺席"));
     await user.type(screen.getByPlaceholderText("例如：已通知家長 / 交通延誤..."), "已通知家長");
     await user.click(screen.getByRole("button", { name: /生病/ }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
 
     await waitFor(() => {
-      // PATCH payload 仍保留 reason 與 note（送後端行為不變）。
+      // PATCH payload 仍保留 reason 與 note（送後端行為不變），並附帶清空的教材欄位。
       expect(updateSession).toHaveBeenCalledWith(10, {
         status: "absent",
         reason: "生病",
         note: "已通知家長",
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       // 卡片右上單一 badge：缺席 · 生病
       expect(screen.getByText("缺席 · 生病")).toBeInTheDocument();
@@ -219,16 +230,121 @@ describe("TodayPage backend session status updates", () => {
     expect(within(weatherButton).getByText("WEA")).toBeInTheDocument();
 
     await user.click(weatherButton);
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
 
     await waitFor(() => {
       expect(updateSession).toHaveBeenCalledWith(10, {
         status: "absent",
         reason: "天氣",
         note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       // 卡片右上單一 badge：缺席 · 天氣
       expect(screen.getByText("缺席 · 天氣")).toBeInTheDocument();
     });
+  });
+
+  it("sends materials through backend PATCH when 教材 + reason code selected", async () => {
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      status: "absent",
+      reason: { id: 1, name: "生病", code: "BACKEND_REASON" },
+      materialsProvided: true,
+      materialsReasonCode: 4,
+    });
+
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} />);
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: /生病\s*SICK/ }));
+    await user.click(screen.getByRole("button", { name: "教材" }));
+    await user.click(screen.getByRole("button", { name: "4 生病" }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        status: "absent",
+        reason: "生病",
+        note: null,
+        materialsProvided: true,
+        materialsReasonCode: 4,
+      });
+    });
+  });
+
+  it("blocks submit and toasts when 教材 toggled without a reason code", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: /生病\s*SICK/ }));
+    await user.click(screen.getByRole("button", { name: "教材" }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    expect(setToast).toHaveBeenCalledWith("請選擇教材服務的申報原因");
+    expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit and toasts when no absence reason selected", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    expect(setToast).toHaveBeenCalledWith("請先選擇學生的缺席原因");
+    expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("pre-selects the absence reason chip when reopening a backend-loaded absent session", async () => {
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={true}
+        initialSessions={[
+          {
+            ...baseSession,
+            status: "absent",
+            reason: { id: 0, name: "生病", code: "BACKEND_REASON" },
+          },
+        ]}
+      />
+    );
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+
+    expect(screen.getByRole("button", { name: /生病\s*SICK/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("pre-selects no chip when the backend reason name is not a preset", async () => {
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={true}
+        initialSessions={[
+          {
+            ...baseSession,
+            status: "absent",
+            reason: { id: 0, name: "未知原因", code: "BACKEND_REASON" },
+          },
+        ]}
+      />
+    );
+
+    await user.click(screen.getByLabelText("記錄缺席"));
+
+    // No preset chip is wrongly selected; safe fallback to none.
+    expect(screen.getByRole("button", { name: /生病\s*SICK/ })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
   });
 
   it("shows only 缺席 on the card when the absent reason is not a preset", async () => {
@@ -262,6 +378,8 @@ describe("TodayPage backend session status updates", () => {
       makeupOfDateISO: undefined,
       makeupOfSessionId: undefined,
       scheduleRuleId: undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     });
 
     const user = userEvent.setup();
@@ -483,6 +601,8 @@ describe("TodayPage backend session status updates", () => {
       makeupOfDateISO: "2026-06-01",
       makeupOfSessionId: 10,
       scheduleRuleId: undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     });
 
     const user = userEvent.setup();
@@ -559,6 +679,8 @@ describe("TodayPage backend session status updates", () => {
       makeupOfDateISO: undefined,
       makeupOfSessionId: undefined,
       scheduleRuleId: undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     });
 
     const user = userEvent.setup();

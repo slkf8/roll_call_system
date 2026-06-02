@@ -45,6 +45,8 @@ const baseSession: Session = {
   durationMin: 60,
   status: "pending",
   kind: "regular",
+  materialsProvided: false,
+  materialsReasonCode: null,
 };
 
 const linkedMakeupSession: Session = {
@@ -58,6 +60,8 @@ const linkedMakeupSession: Session = {
   kind: "makeup",
   makeupOfDateISO: SELECTED_DATE,
   makeupOfSessionId: 10,
+  materialsProvided: false,
+  materialsReasonCode: null,
 };
 
 
@@ -144,6 +148,8 @@ describe("MonthPage backend session operations", () => {
         status: "present",
         reason: null,
         note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       expect(screen.getByText("已到")).toBeInTheDocument();
     });
@@ -164,6 +170,8 @@ describe("MonthPage backend session operations", () => {
         status: "present",
         reason: null,
         note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
       });
       expect(setToast).toHaveBeenCalledWith("點名更新失敗，請確認後端是否正常");
     });
@@ -233,6 +241,8 @@ describe("MonthPage backend session operations", () => {
       makeupOfDateISO: SELECTED_DATE,
       makeupOfSessionId: 10,
       scheduleRuleId: undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     });
 
     const user = userEvent.setup();
@@ -275,6 +285,8 @@ describe("MonthPage backend session operations", () => {
       makeupOfDateISO: undefined,
       makeupOfSessionId: undefined,
       scheduleRuleId: undefined,
+      materialsProvided: false,
+      materialsReasonCode: null,
     });
 
     const user = userEvent.setup();
@@ -816,5 +828,170 @@ describe("MonthPage backend session operations", () => {
       expect(setToast).toHaveBeenCalledWith("批量設定停課 / 假期失敗，請確認後端是否正常");
     });
     expect(latestGlobalEvents).toEqual([]);
+  });
+
+  it("sends materials through backend PATCH when 教材 + reason code selected", async () => {
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      status: "absent",
+      reason: { id: 1, name: "生病", code: "BACKEND_REASON" },
+      materialsProvided: true,
+      materialsReasonCode: 4,
+    });
+
+    const user = userEvent.setup();
+    render(<MonthHarness isSessionsBackendAvailable={true} />);
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: /生病\s*SICK/ }));
+    await user.click(screen.getByRole("button", { name: "教材" }));
+    await user.click(screen.getByRole("button", { name: "4 生病" }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        status: "absent",
+        reason: "生病",
+        note: null,
+        materialsProvided: true,
+        materialsReasonCode: 4,
+      });
+    });
+  });
+
+  it("blocks submit and toasts when 教材 toggled without a reason code", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(<MonthHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: /生病\s*SICK/ }));
+    await user.click(screen.getByRole("button", { name: "教材" }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    expect(setToast).toHaveBeenCalledWith("請選擇教材服務的申報原因");
+    expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit and toasts when no absence reason selected", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(<MonthHarness isSessionsBackendAvailable={true} setToast={setToast} />);
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    expect(setToast).toHaveBeenCalledWith("請先選擇學生的缺席原因");
+    expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("warns when reason 6 exceeds the per-school-year limit on save", async () => {
+    const setToast = vi.fn();
+    const reason6 = (id: number, dateISO: string): Session => ({
+      ...baseSession,
+      id,
+      dateISO,
+      status: "absent",
+      materialsProvided: true,
+      materialsReasonCode: 6,
+    });
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      status: "absent",
+      reason: { id: 1, name: "生病", code: "BACKEND_REASON" },
+      materialsProvided: true,
+      materialsReasonCode: 6,
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MonthHarness
+        isSessionsBackendAvailable={true}
+        setToast={setToast}
+        initialSessions={[
+          baseSession,
+          reason6(101, "2025-10-01"),
+          reason6(102, "2025-11-01"),
+          reason6(103, "2026-01-01"),
+        ]}
+      />
+    );
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄缺席"));
+    await user.click(screen.getByRole("button", { name: /生病\s*SICK/ }));
+    await user.click(screen.getByRole("button", { name: "教材" }));
+    await user.click(screen.getByRole("button", { name: "6 其他" }));
+    await user.click(screen.getByRole("button", { name: "完成缺席紀錄" }));
+
+    await waitFor(() => {
+      expect(setToast).toHaveBeenCalledWith(
+        expect.stringContaining("原因 6 已超過每學年度 3 次上限")
+      );
+    });
+  });
+
+  it("clears materials when switching an absent+materials session to present", async () => {
+    const absentMaterials: Session = {
+      ...baseSession,
+      status: "absent",
+      reason: { id: 4, name: "生病", code: "BACKEND_REASON" },
+      materialsProvided: true,
+      materialsReasonCode: 4,
+    };
+    vi.mocked(updateSession).mockResolvedValueOnce({
+      ...baseSession,
+      status: "present",
+      materialsProvided: false,
+      materialsReasonCode: null,
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MonthHarness
+        isSessionsBackendAvailable={true}
+        initialSessions={[absentMaterials]}
+      />
+    );
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄已到"));
+
+    await waitFor(() => {
+      expect(updateSession).toHaveBeenCalledWith(10, {
+        status: "present",
+        reason: null,
+        note: null,
+        materialsProvided: false,
+        materialsReasonCode: null,
+      });
+    });
+  });
+
+  it("pre-selects the absence reason chip when reopening a backend-loaded absent session", async () => {
+    const user = userEvent.setup();
+    render(
+      <MonthHarness
+        isSessionsBackendAvailable={true}
+        initialSessions={[
+          {
+            ...baseSession,
+            status: "absent",
+            reason: { id: 0, name: "生病", code: "BACKEND_REASON" },
+          },
+        ]}
+      />
+    );
+
+    await openDrawerForDay23(user);
+    await user.click(screen.getByLabelText("記錄缺席"));
+
+    expect(screen.getByRole("button", { name: /生病\s*SICK/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 });

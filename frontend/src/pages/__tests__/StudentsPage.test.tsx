@@ -64,6 +64,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 202,
@@ -74,6 +76,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "makeup",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 203,
@@ -84,6 +88,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "extra",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 204,
@@ -94,6 +100,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 205,
@@ -104,6 +112,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
     {
       id: 206,
@@ -114,6 +124,8 @@ function makeSessions(): Session[] {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     },
   ];
 }
@@ -676,6 +688,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -736,6 +750,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const pastMakeupLinked: Session = {
       id: 1001,
@@ -747,6 +763,8 @@ describe("StudentsPage", () => {
       status: "present",
       kind: "makeup",
       makeupOfSessionId: 999,
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const otherStudentFuture: Session = {
       id: 1002,
@@ -757,6 +775,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -827,6 +847,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -865,6 +887,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -906,6 +930,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const afterScheduledDate: Session = {
       id: 999,
@@ -916,6 +942,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -985,6 +1013,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const afterScheduledDate: Session = {
       id: 999,
@@ -995,6 +1025,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const otherStudentAfter: Session = {
       id: 1002,
@@ -1005,6 +1037,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -1076,6 +1110,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -1116,6 +1152,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const afterScheduledDate: Session = {
       id: 999,
@@ -1126,6 +1164,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       isStudentsBackendAvailable: true,
@@ -1653,6 +1693,8 @@ describe("StudentsPage", () => {
         durationMin: 60,
         status: "pending",
         kind: "regular",
+        materialsProvided: false,
+        materialsReasonCode: null,
       } satisfies Session,
     ];
     const { user, snapshot } = renderStudentsPage({ initialSessions: sessions });
@@ -1702,6 +1744,8 @@ describe("StudentsPage", () => {
         durationMin: 60,
         status: "pending",
         kind: "regular",
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
       {
         id: 208,
@@ -1713,6 +1757,8 @@ describe("StudentsPage", () => {
         status: "pending",
         kind: "makeup",
         makeupOfSessionId: 201,
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
     ];
     const { user, snapshot } = renderStudentsPage({
@@ -1773,6 +1819,8 @@ describe("StudentsPage", () => {
         durationMin: 60,
         status: "pending",
         kind: "regular",
+        materialsProvided: false,
+        materialsReasonCode: null,
       },
     ];
     const { user, snapshot } = renderStudentsPage({
@@ -1800,6 +1848,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       initialSessions: [...makeSessions(), staleRegular],
@@ -1892,6 +1942,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const linkedMakeup: Session = {
       id: 208,
@@ -1903,6 +1955,8 @@ describe("StudentsPage", () => {
       status: "pending",
       kind: "makeup",
       makeupOfSessionId: 201,
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       initialSessions: [...makeSessions(), staleRegular, linkedMakeup],
@@ -1987,6 +2041,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       initialSessions: [...makeSessions(), staleRegular],
@@ -2038,6 +2094,8 @@ describe("StudentsPage", () => {
       durationMin: 60,
       status: "pending",
       kind: "regular",
+      materialsProvided: false,
+      materialsReasonCode: null,
     };
     const { user, snapshot } = renderStudentsPage({
       initialSessions: [...makeSessions(), staleRegular],
