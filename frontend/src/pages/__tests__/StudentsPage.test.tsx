@@ -2191,13 +2191,13 @@ describe("StudentsPage", () => {
   it("renders the batch generate card with the default month range", async () => {
     const { user } = renderStudentsPage();
 
-    const batchButton = screen.getByRole("button", { name: "批量生成本月 regular" });
+    const batchButton = screen.getByRole("button", { name: "批量生成固定課次" });
     expect(batchButton).toBeInTheDocument();
 
     await user.click(batchButton);
     // sheet 副標題唯一可識別此 sheet。
     expect(
-      screen.getByText(/對啟用中且有固定課表的學生在指定日期範圍內生成課次/)
+      screen.getByText(/在指定日期範圍內，依固定課表補齊課次/)
     ).toBeInTheDocument();
     // selectedDate = "2026-04-20"，預設範圍 = 2026-04-01 .. 2026-04-30
     expect(screen.getByDisplayValue("2026-04-01")).toBeInTheDocument();
@@ -2207,14 +2207,14 @@ describe("StudentsPage", () => {
   it("hides the batch generate card when there are no students", () => {
     renderStudentsPage({ initialStudents: [], initialRules: [], initialSessions: [] });
     expect(
-      screen.queryByRole("button", { name: "批量生成本月 regular" })
+      screen.queryByRole("button", { name: "批量生成固定課次" })
     ).not.toBeInTheDocument();
   });
 
   it("shows an inline error and does not run when from date is later than to date", async () => {
     const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     const inputs = document.querySelectorAll<HTMLInputElement>(
       'input[type="date"]'
     );
@@ -2229,7 +2229,7 @@ describe("StudentsPage", () => {
   it("batch-generates regular sessions for active students with active rules and dedups", async () => {
     const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     // 學生 1（active）有 weekday 1+3 active rules + weekday 5 inactive rule。
@@ -2247,11 +2247,11 @@ describe("StudentsPage", () => {
   it("batch generate reports skipped duplicates on second run", async () => {
     const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
     await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     // 第二輪應全部 skip，session 數不變。
@@ -2278,7 +2278,7 @@ describe("StudentsPage", () => {
       initialSessions: [],
     });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     // 學生 1 有 weekday 1 rule，2026-04 內 Mon = 4 個。
@@ -2293,7 +2293,7 @@ describe("StudentsPage", () => {
   it("batch generate honors a restricted date range within the month", async () => {
     const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
     fireEvent.change(inputs[0], { target: { value: "2026-04-15" } });
     fireEvent.change(inputs[1], { target: { value: "2026-04-30" } });
@@ -2334,7 +2334,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     await waitFor(() => expect(snapshot.sessions).toHaveLength(9));
@@ -2359,7 +2359,7 @@ describe("StudentsPage", () => {
       isSessionsBackendAvailable: true,
     });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     await waitFor(() =>
@@ -2384,10 +2384,187 @@ describe("StudentsPage", () => {
       initialSessions: [],
     });
 
-    await user.click(screen.getByRole("button", { name: "批量生成本月 regular" }));
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
     await user.click(screen.getByRole("button", { name: "批量生成" }));
 
     await waitFor(() => expect(snapshot.toasts).toContain("沒有可批量生成的啟用中學生"));
     expect(snapshot.sessions).toEqual([]);
+  });
+
+  // ------------------------------------------------------------
+  // 年份 / 月份快選 + 跨月跨年 + 去技術名詞文案
+  // ------------------------------------------------------------
+
+  it("does not expose technical wording on the batch entry button", () => {
+    renderStudentsPage();
+    expect(screen.getByRole("button", { name: "批量生成固定課次" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批量生成本月 regular" })).not.toBeInTheDocument();
+  });
+
+  it("defaults the chip year to the selected date's year", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+    expect(screen.getByText("2026 年")).toBeInTheDocument();
+  });
+
+  it("steps the chip year with the prev/next arrows", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    await user.click(screen.getByRole("button", { name: "下一年" }));
+    expect(screen.getByText("2027 年")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "上一年" }));
+    await user.click(screen.getByRole("button", { name: "上一年" }));
+    expect(screen.getByText("2025 年")).toBeInTheDocument();
+  });
+
+  it("fills a leap-year February range from the month chip", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+    await user.click(screen.getByRole("button", { name: "下一年" })); // 2027
+    await user.click(screen.getByRole("button", { name: "下一年" })); // 2028
+    await user.click(screen.getByRole("button", { name: "2028 年 2 月" }));
+
+    expect(screen.getByDisplayValue("2028-02-01")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2028-02-29")).toBeInTheDocument();
+  });
+
+  it("fills a non-leap February range from the month chip", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+    await user.click(screen.getByRole("button", { name: "下一年" })); // 2027
+    await user.click(screen.getByRole("button", { name: "2027 年 2 月" }));
+
+    expect(screen.getByDisplayValue("2027-02-01")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2027-02-28")).toBeInTheDocument();
+  });
+
+  it("fills 30-day and 31-day month ranges correctly from chips", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    await user.click(screen.getByRole("button", { name: "2026 年 4 月" })); // 30 days
+    expect(screen.getByDisplayValue("2026-04-01")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2026-04-30")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "2026 年 1 月" })); // 31 days
+    expect(screen.getByDisplayValue("2026-01-01")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2026-01-31")).toBeInTheDocument();
+  });
+
+  it("highlights only the chip matching a full-month range, and none after a manual edit", async () => {
+    const { user } = renderStudentsPage();
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    // Default range = whole April → 4 月 chip selected.
+    expect(screen.getByRole("button", { name: "2026 年 4 月" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    // Other chips not selected.
+    expect(screen.getByRole("button", { name: "2026 年 5 月" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+
+    // Manually narrow the range → no chip highlighted.
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(inputs[1], { target: { value: "2026-04-10" } });
+    expect(screen.getByRole("button", { name: "2026 年 4 月" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+  });
+
+  it("allows a cross-month range and generates across the months", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(inputs[0], { target: { value: "2026-07-15" } });
+    fireEvent.change(inputs[1], { target: { value: "2026-09-20" } });
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.sessions.length).toBeGreaterThan(0));
+    expect(snapshot.sessions.every((s) => s.kind === "regular" && s.studentId === 1)).toBe(true);
+    expect(
+      snapshot.sessions.every((s) => s.dateISO >= "2026-07-15" && s.dateISO <= "2026-09-20")
+    ).toBe(true);
+    expect(snapshot.sessions.some((s) => s.dateISO.startsWith("2026-07"))).toBe(true);
+    expect(snapshot.sessions.some((s) => s.dateISO.startsWith("2026-09"))).toBe(true);
+  });
+
+  it("allows a cross-year range and generates across the year boundary", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(inputs[0], { target: { value: "2026-12-15" } });
+    fireEvent.change(inputs[1], { target: { value: "2027-01-15" } });
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.sessions.length).toBeGreaterThan(0));
+    expect(
+      snapshot.sessions.every((s) => s.dateISO >= "2026-12-15" && s.dateISO <= "2027-01-15")
+    ).toBe(true);
+    expect(snapshot.sessions.some((s) => s.dateISO.startsWith("2026-12"))).toBe(true);
+    expect(snapshot.sessions.some((s) => s.dateISO.startsWith("2027-01"))).toBe(true);
+  });
+
+  it("uses the final manually edited dates even after a chip fill", async () => {
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [] });
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+
+    await user.click(screen.getByRole("button", { name: "2026 年 4 月" })); // fills whole April
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(inputs[0], { target: { value: "2026-04-13" } });
+    fireEvent.change(inputs[1], { target: { value: "2026-04-15" } });
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.sessions.length).toBeGreaterThan(0));
+    expect(
+      snapshot.sessions.every((s) => s.dateISO >= "2026-04-13" && s.dateISO <= "2026-04-15")
+    ).toBe(true);
+  });
+
+  it("never touches makeup or extra sessions during batch generation", async () => {
+    const makeup: Session = {
+      id: 5001,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-20",
+      start: "09:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "makeup",
+      materialsProvided: false,
+      materialsReasonCode: null,
+    };
+    const extra: Session = {
+      id: 5002,
+      studentId: 1,
+      student: { id: 1, name: "陳小明" },
+      dateISO: "2026-04-21",
+      start: "10:00",
+      durationMin: 60,
+      status: "pending",
+      kind: "extra",
+      materialsProvided: false,
+      materialsReasonCode: null,
+    };
+    const { user, snapshot } = renderStudentsPage({ initialSessions: [makeup, extra] });
+
+    await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
+    await user.click(screen.getByRole("button", { name: "批量生成" }));
+
+    await waitFor(() => expect(snapshot.sessions.length).toBeGreaterThan(2));
+    const keptMakeup = snapshot.sessions.find((s) => s.id === 5001);
+    const keptExtra = snapshot.sessions.find((s) => s.id === 5002);
+    expect(keptMakeup).toEqual(makeup);
+    expect(keptExtra).toEqual(extra);
+    // New sessions are all regular; makeup/extra untouched.
+    const added = snapshot.sessions.filter((s) => s.id !== 5001 && s.id !== 5002);
+    expect(added.every((s) => s.kind === "regular")).toBe(true);
   });
 });

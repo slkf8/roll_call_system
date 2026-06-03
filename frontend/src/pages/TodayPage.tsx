@@ -746,35 +746,43 @@ export default function TodayPage({
             </button>
 
             <div className="flex flex-col items-center relative">
-              <button
-                onClick={() => {
-                  const input = datePickerRef.current as any;
-                  if (input) {
-                    if (typeof input.showPicker === 'function') {
-                      input.showPicker();
-                    } else {
-                      input.click();
+              {/* The visible date text plus a transparent, tappable date input
+                  overlaid exactly on top of it. On iPad/iOS Safari (no
+                  showPicker support) the genuine tap lands on the input and
+                  opens the native picker; on desktop the onClick calls
+                  showPicker() as an enhancement. The overlay is scoped to the
+                  date text only, so it never blocks 回到今天 / the arrows. */}
+              <div className="relative inline-flex items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className={`text-[18px] font-bold transition-opacity ${
+                    isDark ? 'text-[#F2F2F7]' : 'text-slate-800'
+                  }`}
+                >
+                  {formatZHDate(selectedDate)}
+                </span>
+
+                <input
+                  ref={datePickerRef}
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    if (e.target.value) setSelectedDate(e.target.value);
+                  }}
+                  onClick={() => {
+                    const input = datePickerRef.current as any;
+                    if (input && typeof input.showPicker === 'function') {
+                      try {
+                        input.showPicker();
+                      } catch {
+                        /* showPicker can throw outside a user gesture; ignore. */
+                      }
                     }
-                  }
-                }}
-                className={`text-[18px] font-bold active:opacity-50 transition-opacity ${
-                  isDark ? 'text-[#F2F2F7]' : 'text-slate-800'
-                }`}
-                aria-label="選擇日期"
-              >
-                {formatZHDate(selectedDate)}
-              </button>
-              
-              <input
-                ref={datePickerRef}
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  if (e.target.value) setSelectedDate(e.target.value);
-                }}
-                className="absolute w-0 h-0 opacity-0 pointer-events-none -z-10"
-                tabIndex={-1}
-              />
+                  }}
+                  aria-label="選擇日期"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                />
+              </div>
 
               {selectedDate !== todayISO() && (
                 <button

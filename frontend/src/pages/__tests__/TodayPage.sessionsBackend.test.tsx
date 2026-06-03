@@ -1068,3 +1068,76 @@ describe("TodayPage backend session status updates", () => {
     });
   });
 });
+
+
+// ------------------------------------------------------------
+// 頂部日期選擇器（iPad 可點修復 — 互動層回歸測試）
+// jsdom 無法驗證 iOS 原生 picker 是否彈出；此處只鎖定「input 具備真實可
+// 互動條件」與既有箭嘴 / 回到今天行為，iPad 真機行為留待人工驗收。
+// ------------------------------------------------------------
+function DatePickerHarness({ initialDate = "2026-06-15" }: { initialDate?: string }) {
+  const [selectedDate, setSelectedDate] = React.useState(initialDate);
+  return (
+    <TodayPage
+      setTheme={vi.fn()}
+      selectedDate={selectedDate}
+      setSelectedDate={setSelectedDate}
+      now={new Date("2026-06-15T12:00:00")}
+      students={[student]}
+      sessions={[]}
+      setSessions={vi.fn()}
+      isSessionsBackendAvailable={false}
+      isGlobalEventsBackendAvailable={false}
+      globalEvents={[]}
+      setGlobalEvents={vi.fn()}
+      setToast={vi.fn()}
+    />
+  );
+}
+
+describe("TodayPage top date picker (iPad fix)", () => {
+  it("renders a tappable, overlaid date input (no hidden/zero-size/pointer-events-none)", () => {
+    render(<DatePickerHarness />);
+    const input = screen.getByLabelText("選擇日期") as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.type).toBe("date");
+
+    const cls = input.getAttribute("class") ?? "";
+    expect(cls).toContain("inset-0");
+    expect(cls).not.toContain("pointer-events-none");
+    expect(cls).not.toContain("w-0");
+    expect(cls).not.toContain("h-0");
+    expect(cls).not.toContain("-z-10");
+    // No longer disabled from the tab order.
+    expect(input.getAttribute("tabindex")).not.toBe("-1");
+  });
+
+  it("updates the selected date when the overlay input changes", () => {
+    render(<DatePickerHarness />);
+    const input = screen.getByLabelText("選擇日期") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "2026-07-04" } });
+    expect((screen.getByLabelText("選擇日期") as HTMLInputElement).value).toBe("2026-07-04");
+  });
+
+  it("keeps the prev/next day arrows working", async () => {
+    const user = userEvent.setup();
+    render(<DatePickerHarness />);
+    const getInput = () => screen.getByLabelText("選擇日期") as HTMLInputElement;
+
+    await user.click(screen.getByRole("button", { name: "下一天" }));
+    expect(getInput().value).toBe("2026-06-16");
+
+    await user.click(screen.getByRole("button", { name: "上一天" }));
+    await user.click(screen.getByRole("button", { name: "上一天" }));
+    expect(getInput().value).toBe("2026-06-14");
+  });
+
+  it("keeps 回到今天 clickable and moves the date off the selected day", async () => {
+    const user = userEvent.setup();
+    render(<DatePickerHarness />);
+    const back = screen.getByRole("button", { name: "回到今天" });
+    expect(back).toBeInTheDocument();
+    await user.click(back);
+    expect((screen.getByLabelText("選擇日期") as HTMLInputElement).value).not.toBe("2026-06-15");
+  });
+});

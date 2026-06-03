@@ -164,10 +164,6 @@ function getDatesInRange(fromISO: string, toISO: string) {
   return dates;
 }
 
-function isSameMonth(aISO: string, bISO: string) {
-  return aISO.slice(0, 7) === bISO.slice(0, 7);
-}
-
 function formatWeekdayLabel(weekday: StudentScheduleRule["weekday"]) {
   const labels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"] as const;
   return labels[weekday];
@@ -324,6 +320,10 @@ export default function StudentsPage({
   const [batchToDate, setBatchToDate] = useState("");
   const [batchDateError, setBatchDateError] = useState("");
   const [batchRunning, setBatchRunning] = useState(false);
+  // 年份快選（月份 chips 用）；只影響 chips 填入，不直接改日期範圍。
+  const [batchChipYear, setBatchChipYear] = useState<number>(
+    () => Number((todayISO() || "").slice(0, 4)) || new Date().getFullYear()
+  );
 
   const todayStr = todayISO();
 
@@ -791,9 +791,25 @@ export default function StudentsPage({
     const anchor = selectedDate || todayStr;
     setBatchFromDate(getMonthStartISO(anchor));
     setBatchToDate(getMonthEndISO(anchor));
+    setBatchChipYear(Number(anchor.slice(0, 4)) || new Date().getFullYear());
     setBatchDateError("");
     setBatchRunning(false);
     setBatchSheetOpen(true);
+  }
+
+  // Quick-fill the range from a year + month chip. The user can still edit the
+  // start/end dates afterwards, and the range may span months/years.
+  function applyBatchMonthChip(month: number) {
+    const ym = `${batchChipYear}-${pad2(month)}`;
+    setBatchFromDate(getMonthStartISO(ym));
+    setBatchToDate(getMonthEndISO(ym));
+    setBatchDateError("");
+  }
+
+  // Highlight a chip only when the current range is exactly that whole month.
+  function isBatchMonthChipSelected(month: number) {
+    const ym = `${batchChipYear}-${pad2(month)}`;
+    return batchFromDate === getMonthStartISO(ym) && batchToDate === getMonthEndISO(ym);
   }
 
   function closeBatchSheet() {
@@ -817,14 +833,6 @@ export default function StudentsPage({
     }
     if (batchFromDate > batchToDate) {
       setBatchDateError("結束日期需晚於或等於開始日期");
-      return;
-    }
-    // 兩端日期皆必須位於 selectedDate 所在月份。
-    if (
-      !isSameMonth(batchFromDate, selectedDate) ||
-      !isSameMonth(batchToDate, selectedDate)
-    ) {
-      setBatchDateError("請選擇本月範圍內的日期");
       return;
     }
 
@@ -1535,7 +1543,7 @@ export default function StudentsPage({
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold">批量操作</div>
                   <div className="mt-1 text-[13px] leading-5 text-[#8E8E93]">
-                    對「啟用中且有固定課表」的學生在指定日期範圍內生成 regular 課次，
+                    對「啟用中且有固定課表」的學生在指定日期範圍內補齊固定課次，
                     重複的時段會自動略過。
                   </div>
                 </div>
@@ -1545,7 +1553,7 @@ export default function StudentsPage({
                     onClick={openBatchSheet}
                     className={primaryButtonClass}
                   >
-                    批量生成本月 regular
+                    批量生成固定課次
                   </button>
                 </div>
               </div>
@@ -2189,8 +2197,8 @@ export default function StudentsPage({
 
       <IOSSheet
         open={batchSheetOpen}
-        title="批量生成本月 regular"
-        subtitle="對啟用中且有固定課表的學生在指定日期範圍內生成課次（去重）。"
+        title="批量生成固定課次"
+        subtitle="在指定日期範圍內，依固定課表補齊課次。"
         onClose={closeBatchSheet}
         leftAction={{ label: "取消", onClick: closeBatchSheet }}
         rightAction={{
@@ -2204,14 +2212,65 @@ export default function StudentsPage({
       >
         <div className="space-y-4">
           <div className={cardClass}>
+            <div className="space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  aria-label="上一年"
+                  onClick={() => setBatchChipYear((y) => y - 1)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-[18px] font-semibold ${
+                    isDark ? "text-[#8E8E93] hover:bg-[#2C2C2E]" : "text-slate-600 hover:bg-[#F2F2F7]"
+                  }`}
+                >
+                  ‹
+                </button>
+                <div className="text-[15px] font-semibold">{batchChipYear} 年</div>
+                <button
+                  type="button"
+                  aria-label="下一年"
+                  onClick={() => setBatchChipYear((y) => y + 1)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-[18px] font-semibold ${
+                    isDark ? "text-[#8E8E93] hover:bg-[#2C2C2E]" : "text-slate-600 hover:bg-[#F2F2F7]"
+                  }`}
+                >
+                  ›
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
+                  const selected = isBatchMonthChipSelected(month);
+                  return (
+                    <button
+                      key={month}
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`${batchChipYear} 年 ${month} 月`}
+                      onClick={() => applyBatchMonthChip(month)}
+                      className={`rounded-2xl px-3 py-2 text-[14px] font-medium transition ${
+                        selected
+                          ? isDark
+                            ? "bg-[#0A84FF] text-white"
+                            : "bg-[#007AFF] text-white"
+                          : isDark
+                          ? "bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]"
+                          : "bg-[#F2F2F7] text-[#1C1C1E] ring-1 ring-[#E5E5EA] hover:bg-[#EAEAEE]"
+                      }`}
+                    >
+                      {month}月
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className={cardClass}>
             <div className="space-y-4 p-4">
               <FieldRow label="開始日期">
                 <div className="w-full text-left">
                   <input
                     type="date"
                     value={batchFromDate}
-                    min={selectedDate ? getMonthStartISO(selectedDate) : undefined}
-                    max={selectedDate ? getMonthEndISO(selectedDate) : undefined}
                     onChange={(e) => {
                       setBatchFromDate(e.target.value);
                       if (batchDateError) setBatchDateError("");
@@ -2225,8 +2284,6 @@ export default function StudentsPage({
                   <input
                     type="date"
                     value={batchToDate}
-                    min={selectedDate ? getMonthStartISO(selectedDate) : undefined}
-                    max={selectedDate ? getMonthEndISO(selectedDate) : undefined}
                     onChange={(e) => {
                       setBatchToDate(e.target.value);
                       if (batchDateError) setBatchDateError("");
@@ -2247,9 +2304,8 @@ export default function StudentsPage({
                 對象：啟用中且有固定課表的學生
                 （目前 {safeStudents.filter((s) => s.status === "active" && safeRules.some((r) => r.studentId === s.id && r.isActive)).length} 位）
               </div>
-              <div>同學生 + 同日期 + 同開始時間的 regular 課次會自動略過，不會重複生成。</div>
-              <div>只處理 regular 課次；不會動到 makeup / extra / 既有非 regular 課次。</div>
-              <div>本輪僅限本月範圍：{selectedDate ? selectedDate.slice(0, 7) : "—"}。</div>
+              <div>同學生、同日期、同開始時間的固定課次會自動略過，不會重複生成。</div>
+              <div>只會補齊缺少的固定課次，不影響補課與加課。</div>
             </div>
           </div>
         </div>
