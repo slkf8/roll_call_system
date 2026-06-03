@@ -3,7 +3,9 @@ export { API_BASE_URL };
 
 export type ExcelFillWrite = {
   cellAddress: string;
-  value: number;
+  // number for count columns; a validated "<day>-<code>" string for the
+  // materials reason column.
+  value: number | string;
   studentId?: number | null;
   studentName?: string | null;
   birthday?: string | null;

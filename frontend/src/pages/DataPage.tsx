@@ -2,7 +2,7 @@ import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "reac
 import type { Dispatch, SetStateAction } from "react";
 import * as XLSX from "xlsx";
 import { fillExcelTemplate } from "../api/exportsApi";
-import type { ExcelFillTemplatePayload } from "../api/exportsApi";
+import type { ExcelFillTemplatePayload, ExcelFillWrite } from "../api/exportsApi";
 import { fetchMonthlyStatistics } from "../api/statisticsApi";
 import type { MonthlyStatistics, MonthlyStatisticsStudentRow } from "../api/statisticsApi";
 import type {
@@ -29,6 +29,8 @@ import {
   isWithinSchoolYear,
   countReason6ForStudent,
   REASON6_PER_SCHOOL_YEAR_LIMIT,
+  buildMaterialsReasonString,
+  isValidMaterialsReasonString,
 } from "../shared/appShared";
 import type { MaterialsReasonCode, SchoolYearRange } from "../shared/appShared";
 import {
@@ -80,14 +82,28 @@ type TemplateColumnOption = {
   label: string;
 };
 
+// A planned write into one mapped column for one matched student.
+// `value === null` (materials count) or `value === ""` (reason) means
+// skip-write: keep the template's original cell value untouched.
+type MatchedCellPlan<T extends number | string | null> = {
+  column: string;
+  cellAddress: string;
+  originalValue: string;
+  value: T;
+};
+
 type MatchedStudentRow = {
   student: StudentProfile;
   attendanceRow: StudentAttendanceRow;
   excelRow: number;
+  // Direct service (Phase 1, kept flat for backward compatibility).
   targetColumn: string;
   cellAddress: string;
   originalValue: string;
   value: number;
+  // Materials columns (Phase 2). Present only when the column is mapped.
+  materials?: MatchedCellPlan<number | null>;
+  materialsReason?: MatchedCellPlan<string>;
 };
 
 type DuplicatedMatch = {
@@ -104,7 +120,7 @@ type WorksheetData = {
 
 type XlsxPopulateSheet = {
   cell: (address: string) => {
-    value: (nextValue: number) => void;
+    value: (nextValue: number | string) => void;
   };
 };
 
@@ -122,7 +138,11 @@ type ColumnAnalysis = {
   nameColumn: string;
   birthdayColumn: string;
   directServiceColumn: string;
+  materialsColumn: string;
+  materialsReasonColumn: string;
   columnCandidates: TemplateColumnCandidate[];
+  materialsCandidates: TemplateColumnCandidate[];
+  materialsReasonCandidates: TemplateColumnCandidate[];
 };
 
 const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -244,6 +264,7 @@ function sortStudents(a: StudentProfile, b: StudentProfile) {
 
 function normalizeText(value: unknown) {
   return String(value ?? "")
+    .replace(/／/g, "/") // full-width slash -> half-width, so header matching is consistent
     .replace(/\s+/g, "")
     .trim()
     .toLowerCase();
@@ -341,6 +362,21 @@ function columnLabel(column: string, path: string[]) {
   return `${column}：${path.length > 0 ? path.join(" > ") : "空白欄"}`;
 }
 
+// Match a month label ("1月") inside a header path without colliding with a
+// longer month number ("11月"). Requires the matched month not to be preceded
+// by another digit, so target 1月 never matches 11月 (nor 2月 vs 12月).
+function normalizedPathIncludesMonth(normalizedPath: string, normalizedMonthLabel: string) {
+  if (!normalizedMonthLabel) return false;
+  let from = 0;
+  for (;;) {
+    const idx = normalizedPath.indexOf(normalizedMonthLabel, from);
+    if (idx === -1) return false;
+    const prevChar = idx > 0 ? normalizedPath[idx - 1] : "";
+    if (!/[0-9]/.test(prevChar)) return true;
+    from = idx + 1;
+  }
+}
+
 function scoreColumn(path: string[], keywords: string[]) {
   const normalizedPath = normalizeText(path.join(">"));
   return keywords.reduce((score, keyword) => {
@@ -356,6 +392,12 @@ function getPreferredCandidate(candidates: TemplateColumnCandidate[]) {
   );
 }
 
+// Materials columns auto-select ONLY when a high-confidence (target-month)
+// match exists; medium/low remain manual-select options to avoid mis-filling.
+function getHighConfidenceCandidate(candidates: TemplateColumnCandidate[]) {
+  return candidates.find((candidate) => candidate.confidence === "high");
+}
+
 function analyzeWorksheetColumns(
   worksheet: XLSX.WorkSheet,
   targetMonthLabel: string,
@@ -368,12 +410,18 @@ function analyzeWorksheetColumns(
       nameColumn: "",
       birthdayColumn: "",
       directServiceColumn: "",
+      materialsColumn: "",
+      materialsReasonColumn: "",
       columnCandidates: [],
+      materialsCandidates: [],
+      materialsReasonCandidates: [],
     };
   }
 
   const availableColumns: TemplateColumnOption[] = [];
   const columnCandidates: TemplateColumnCandidate[] = [];
+  const materialsCandidates: TemplateColumnCandidate[] = [];
+  const materialsReasonCandidates: TemplateColumnCandidate[] = [];
   let bestName: { column: string; score: number } | null = null;
   let bestBirthday: { column: string; score: number } | null = null;
 
@@ -398,9 +446,17 @@ function analyzeWorksheetColumns(
       bestBirthday = { column, score: birthdayScore };
     }
 
-    const hasTargetMonth = normalizedPath.includes(normalizeText(targetMonthLabel));
+    const hasTargetMonth = normalizedPathIncludesMonth(
+      normalizedPath,
+      normalizeText(targetMonthLabel)
+    );
     const hasIndividual = normalizedPath.includes("個別");
     const hasDirectService = normalizedPath.includes("直接服務");
+    // normalizeText already maps full-width ／ -> half-width /.
+    const hasConsult = normalizedPath.includes(normalizeText("配合圖文資料提供諮詢"));
+    const hasSuggest = normalizedPath.includes("建議");
+    const hasReason = normalizedPath.includes("原因");
+    const hasVideoOr = normalizedPath.includes("視像或");
 
     if (hasDirectService) {
       const confidence: TemplateColumnCandidate["confidence"] =
@@ -414,16 +470,44 @@ function analyzeWorksheetColumns(
         confidence,
       });
     }
+
+    // 個別 → 配合圖文資料提供諮詢／建議 (materials count column).
+    if (hasIndividual && hasConsult && hasSuggest && !hasReason && !hasVideoOr) {
+      materialsCandidates.push({
+        column,
+        columnIndex: colIndex,
+        label: columnLabel(column, path),
+        path,
+        confidence: hasTargetMonth ? "high" : "low",
+      });
+    }
+
+    // 視像或配合圖文資料提供諮詢／建議原因 (materials reason column).
+    if (hasVideoOr && hasConsult && hasReason) {
+      materialsReasonCandidates.push({
+        column,
+        columnIndex: colIndex,
+        label: columnLabel(column, path),
+        path,
+        confidence: hasTargetMonth ? "high" : "low",
+      });
+    }
   }
 
   const preferredCandidate = getPreferredCandidate(columnCandidates);
+  const materialsCandidate = getHighConfidenceCandidate(materialsCandidates);
+  const materialsReasonCandidate = getHighConfidenceCandidate(materialsReasonCandidates);
 
   return {
     availableColumns,
     nameColumn: bestName?.column ?? "",
     birthdayColumn: bestBirthday?.column ?? "",
     directServiceColumn: preferredCandidate?.column ?? "",
+    materialsColumn: materialsCandidate?.column ?? "",
+    materialsReasonColumn: materialsReasonCandidate?.column ?? "",
     columnCandidates,
+    materialsCandidates,
+    materialsReasonCandidates,
   };
 }
 
@@ -473,14 +557,24 @@ function matchStudentsToWorksheet({
   nameColumn,
   birthdayColumn,
   directServiceColumn,
+  materialsColumn,
+  materialsReasonColumn,
   attendanceRows,
+  sessionsByStudentId,
+  monthStartISO,
+  monthEndISO,
 }: {
   worksheet: XLSX.WorkSheet;
   range: XLSX.Range | null;
   nameColumn: string;
   birthdayColumn: string;
   directServiceColumn: string;
+  materialsColumn: string;
+  materialsReasonColumn: string;
   attendanceRows: StudentAttendanceRow[];
+  sessionsByStudentId: Map<number, Session[]>;
+  monthStartISO: string;
+  monthEndISO: string;
 }) {
   const matchedRows: MatchedStudentRow[] = [];
   const unmatchedStudents: StudentAttendanceRow[] = [];
@@ -511,16 +605,48 @@ function matchStudentsToWorksheet({
     const excelRows = excelRowsByStudentKey.get(key) ?? [];
 
     if (excelRows.length === 1) {
-      const cellAddress = `${directServiceColumn}${excelRows[0]}`;
+      const excelRow = excelRows[0];
+      const cellAddress = `${directServiceColumn}${excelRow}`;
+
+      // Materials count + reason use the same session-derived count as the
+      // formatter, so the D4 defensive check never trips under normal data.
+      const matCount = attendanceRow.materialsCount;
+      const studentSessions = sessionsByStudentId.get(attendanceRow.student.id) ?? [];
+
+      const materials: MatchedCellPlan<number | null> | undefined = materialsColumn
+        ? {
+            column: materialsColumn,
+            cellAddress: `${materialsColumn}${excelRow}`,
+            originalValue: getCellDisplayValue(worksheet, `${materialsColumn}${excelRow}`),
+            value: matCount > 0 ? matCount : null,
+          }
+        : undefined;
+
+      const materialsReason: MatchedCellPlan<string> | undefined = materialsReasonColumn
+        ? {
+            column: materialsReasonColumn,
+            cellAddress: `${materialsReasonColumn}${excelRow}`,
+            originalValue: getCellDisplayValue(
+              worksheet,
+              `${materialsReasonColumn}${excelRow}`
+            ),
+            value:
+              matCount > 0
+                ? buildMaterialsReasonString(studentSessions, monthStartISO, monthEndISO)
+                : "",
+          }
+        : undefined;
 
       matchedRows.push({
         student: attendanceRow.student,
         attendanceRow,
-        excelRow: excelRows[0],
+        excelRow,
         targetColumn: directServiceColumn,
         cellAddress,
         originalValue: getCellDisplayValue(worksheet, cellAddress),
         value: attendanceRow.totalPresentCount,
+        materials,
+        materialsReason,
       });
       return;
     }
@@ -634,7 +760,13 @@ export default function DataPage({
   const [nameColumn, setNameColumn] = useState("");
   const [birthdayColumn, setBirthdayColumn] = useState("");
   const [directServiceColumn, setDirectServiceColumn] = useState("");
+  const [materialsColumn, setMaterialsColumn] = useState("");
+  const [materialsReasonColumn, setMaterialsReasonColumn] = useState("");
   const [columnCandidates, setColumnCandidates] = useState<TemplateColumnCandidate[]>([]);
+  const [materialsCandidates, setMaterialsCandidates] = useState<TemplateColumnCandidate[]>([]);
+  const [materialsReasonCandidates, setMaterialsReasonCandidates] = useState<
+    TemplateColumnCandidate[]
+  >([]);
   const [availableColumns, setAvailableColumns] = useState<TemplateColumnOption[]>([]);
   const [matchedRows, setMatchedRows] = useState<MatchedStudentRow[]>([]);
   const [unmatchedStudents, setUnmatchedStudents] = useState<StudentAttendanceRow[]>([]);
@@ -812,6 +944,14 @@ export default function DataPage({
     () => uniqueDirectServiceOptions(columnCandidates, availableColumns),
     [columnCandidates, availableColumns]
   );
+  const materialsOptions = useMemo(
+    () => uniqueDirectServiceOptions(materialsCandidates, availableColumns),
+    [materialsCandidates, availableColumns]
+  );
+  const materialsReasonOptions = useMemo(
+    () => uniqueDirectServiceOptions(materialsReasonCandidates, availableColumns),
+    [materialsReasonCandidates, availableColumns]
+  );
 
   // 原因 6 學年範圍：override 套用於範圍內日期，否則以目標月份推算 Sep–Aug。
   const schoolYearRange = useMemo(
@@ -888,13 +1028,28 @@ export default function DataPage({
       nameColumn,
       birthdayColumn,
       directServiceColumn,
+      materialsColumn,
+      materialsReasonColumn,
       attendanceRows: localAttendanceRows,
+      sessionsByStudentId,
+      monthStartISO: monthRange.monthStartISO,
+      monthEndISO: monthRange.monthEndISO,
     });
 
     setMatchedRows(result.matchedRows);
     setUnmatchedStudents(result.unmatchedStudents);
     setDuplicatedMatches(result.duplicatedMatches);
-  }, [worksheetData, nameColumn, birthdayColumn, directServiceColumn, localAttendanceRows]);
+  }, [
+    worksheetData,
+    nameColumn,
+    birthdayColumn,
+    directServiceColumn,
+    materialsColumn,
+    materialsReasonColumn,
+    localAttendanceRows,
+    sessionsByStudentId,
+    monthRange,
+  ]);
 
   function applyWorksheet(nextWorkbook: XLSX.WorkBook, sheetName: string) {
     const worksheet = nextWorkbook.Sheets[sheetName];
@@ -904,9 +1059,13 @@ export default function DataPage({
       setWorksheetData(null);
       setAvailableColumns([]);
       setColumnCandidates([]);
+      setMaterialsCandidates([]);
+      setMaterialsReasonCandidates([]);
       setNameColumn("");
       setBirthdayColumn("");
       setDirectServiceColumn("");
+      setMaterialsColumn("");
+      setMaterialsReasonColumn("");
       return;
     }
 
@@ -916,9 +1075,13 @@ export default function DataPage({
     setWorksheetData({ worksheet, range, maxHeaderRows });
     setAvailableColumns(analysis.availableColumns);
     setColumnCandidates(analysis.columnCandidates);
+    setMaterialsCandidates(analysis.materialsCandidates);
+    setMaterialsReasonCandidates(analysis.materialsReasonCandidates);
     setNameColumn(analysis.nameColumn);
     setBirthdayColumn(analysis.birthdayColumn);
     setDirectServiceColumn(analysis.directServiceColumn);
+    setMaterialsColumn(analysis.materialsColumn);
+    setMaterialsReasonColumn(analysis.materialsReasonColumn);
   }
 
   async function handleTemplateFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -954,9 +1117,13 @@ export default function DataPage({
       setWorksheetData(null);
       setAvailableColumns([]);
       setColumnCandidates([]);
+      setMaterialsCandidates([]);
+      setMaterialsReasonCandidates([]);
       setNameColumn("");
       setBirthdayColumn("");
       setDirectServiceColumn("");
+      setMaterialsColumn("");
+      setMaterialsReasonColumn("");
       setTemplateReadError("無法讀取此 xlsx 模板，請確認檔案格式是否正確");
       setToast("無法讀取此 xlsx 模板");
     } finally {
@@ -1000,7 +1167,61 @@ export default function DataPage({
   );
   const exportTargetColumn = getColumnLetters(matchedRows[0]?.cellAddress);
 
+  // Materials-related export gating (D2 / D4 + supplements 2 & 5).
+  // Month-level materials presence drives whether columns are mandatory.
+  const monthHasMaterials = localMaterialsTotal > 0;
+
+  // Flagged-but-invalid materials: absent + provided but reason code not 1-6
+  // (defends against legacy/localStorage data being silently dropped).
+  const hasInvalidFlaggedMaterials = useMemo(
+    () =>
+      monthlySessions.some(
+        (session) =>
+          session.status === "absent" &&
+          session.materialsProvided === true &&
+          (session.materialsReasonCode == null ||
+            session.materialsReasonCode < 1 ||
+            session.materialsReasonCode > 6)
+      ),
+    [monthlySessions]
+  );
+
+  const exportGate = useMemo(() => {
+    const columnsComplete = Boolean(materialsColumn && materialsReasonColumn);
+    const selectedCols = [directServiceColumn, materialsColumn, materialsReasonColumn].filter(
+      Boolean
+    );
+    const hasCollision = new Set(selectedCols).size !== selectedCols.length;
+
+    let blockReason: string | null = null;
+    let degradeNotice: string | null = null;
+
+    if (hasInvalidFlaggedMaterials) {
+      blockReason = "部分教材服務缺少有效申報原因，請先檢查教材紀錄。";
+    } else if (monthHasMaterials && !columnsComplete) {
+      blockReason =
+        "本月存在教材服務，但尚未設定完整的教材次數欄與原因欄。請選擇對應欄位後再匯出。";
+    } else if (monthHasMaterials && hasCollision) {
+      blockReason = "直接服務欄、教材次數欄與原因欄不能使用同一個 Excel 欄位。";
+    } else if (!monthHasMaterials && !columnsComplete) {
+      degradeNotice =
+        "未偵測到教材相關欄位。本月沒有教材服務，將只填寫直接服務欄位。";
+    }
+
+    return { blockReason, degradeNotice };
+  }, [
+    monthHasMaterials,
+    hasInvalidFlaggedMaterials,
+    directServiceColumn,
+    materialsColumn,
+    materialsReasonColumn,
+  ]);
+
   function handleOpenExportConfirm() {
+    if (exportGate.blockReason) {
+      setToast(exportGate.blockReason);
+      return;
+    }
     setIsExportConfirmOpen(true);
   }
 
@@ -1020,7 +1241,51 @@ export default function DataPage({
     URL.revokeObjectURL(url);
   }
 
-  async function exportFilledTemplateWithBackend() {
+  // Single source of truth for what gets written. Both the backend payload and
+  // the xlsx-populate fallback consume this exact list, so they can never drift.
+  //  - direct service: always written (number, including 0)
+  //  - materials count: only when materialsCount > 0 (value !== null)
+  //  - materials reason: only when materialsCount > 0 and formatter non-empty
+  function buildExportWrites(): ExcelFillWrite[] {
+    const writes: ExcelFillWrite[] = [];
+
+    matchedRows.forEach((row) => {
+      const studentMeta = {
+        studentId: row.student.id,
+        studentName: row.student.name,
+        birthday: row.student.birthday || null,
+      };
+
+      writes.push({
+        cellAddress: row.cellAddress,
+        value: row.value,
+        ...studentMeta,
+        reason: "direct_service_count",
+      });
+
+      if (row.materials && row.materials.value !== null) {
+        writes.push({
+          cellAddress: row.materials.cellAddress,
+          value: row.materials.value,
+          ...studentMeta,
+          reason: "materials_count",
+        });
+      }
+
+      if (row.materialsReason && row.materialsReason.value !== "") {
+        writes.push({
+          cellAddress: row.materialsReason.cellAddress,
+          value: row.materialsReason.value,
+          ...studentMeta,
+          reason: "materials_reason",
+        });
+      }
+    });
+
+    return writes;
+  }
+
+  async function exportFilledTemplateWithBackend(writes: ExcelFillWrite[]) {
     if (!templateArrayBuffer) {
       throw new Error("Template buffer is required");
     }
@@ -1031,14 +1296,7 @@ export default function DataPage({
     const payload: ExcelFillTemplatePayload = {
       worksheetName: selectedSheetName,
       month: monthToken,
-      writes: matchedRows.map((row) => ({
-        cellAddress: row.cellAddress,
-        value: row.value,
-        studentId: row.student.id,
-        studentName: row.student.name,
-        birthday: row.student.birthday || null,
-        reason: "direct_service_count",
-      })),
+      writes,
       options: {
         preserveTemplate: true,
       },
@@ -1047,7 +1305,7 @@ export default function DataPage({
     return fillExcelTemplate(templateBlob, payload);
   }
 
-  async function exportFilledTemplateLocally() {
+  async function exportFilledTemplateLocally(writes: ExcelFillWrite[]) {
     if (!templateArrayBuffer) {
       throw new Error("Template buffer is required");
     }
@@ -1060,8 +1318,8 @@ export default function DataPage({
       throw new Error("Selected worksheet not found");
     }
 
-    matchedRows.forEach((row) => {
-      sheet.cell(row.cellAddress).value(row.value);
+    writes.forEach((write) => {
+      sheet.cell(write.cellAddress).value(write.value);
     });
 
     const output = await populatedWorkbook.outputAsync();
@@ -1101,8 +1359,43 @@ export default function DataPage({
       return;
     }
 
+    // Re-check the materials gate at export time (state may have changed since
+    // the confirm dialog opened).
+    if (exportGate.blockReason) {
+      setToast(exportGate.blockReason);
+      return;
+    }
+
+    // D4 defensive: a student with materials count > 0 must also produce a
+    // non-empty reason; never write the count alone.
+    const reasonMissing = matchedRows.some(
+      (row) =>
+        row.materials != null &&
+        row.materials.value != null &&
+        row.materials.value > 0 &&
+        (!row.materialsReason || row.materialsReason.value === "")
+    );
+    if (reasonMissing) {
+      setToast("部分教材服務缺少有效申報原因，請先檢查教材紀錄。");
+      return;
+    }
+
+    const writes = buildExportWrites();
+
+    // Supplement 6: pre-validate every reason write before touching backend or
+    // fallback. Backend and fallback only ever consume validated writes.
+    const reasonFormatInvalid = writes.some(
+      (write) =>
+        write.reason === "materials_reason" &&
+        (typeof write.value !== "string" || !isValidMaterialsReasonString(write.value))
+    );
+    if (reasonFormatInvalid) {
+      setToast("部分教材服務的原因格式異常，請先檢查教材紀錄。");
+      return;
+    }
+
     try {
-      const blob = await exportFilledTemplateWithBackend();
+      const blob = await exportFilledTemplateWithBackend(writes);
       downloadFilledTemplate(blob);
       setToast(`已匯出並填入 ${matchedRows.length} 筆資料`);
       return;
@@ -1112,7 +1405,7 @@ export default function DataPage({
     }
 
     try {
-      const blob = await exportFilledTemplateLocally();
+      const blob = await exportFilledTemplateLocally(writes);
       downloadFilledTemplate(blob);
       setToast(`已匯出並填入 ${matchedRows.length} 筆資料`);
     } catch (error) {
@@ -1616,13 +1909,65 @@ export default function DataPage({
                         ))}
                       </select>
                     </label>
+
+                    <label>
+                      <div className={`mb-2 text-[13px] font-medium ${mutedTextClass}`}>
+                        個別 / 配合圖文資料提供諮詢／建議欄（教材次數）
+                      </div>
+                      <select
+                        className={selectClass}
+                        value={materialsColumn}
+                        onChange={(event) => setMaterialsColumn(event.target.value)}
+                        disabled={materialsOptions.length === 0}
+                      >
+                        <option value="">請選擇欄位</option>
+                        {materialsOptions.map((column) => (
+                          <option key={column.column} value={column.column}>
+                            {column.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <div className={`mb-2 text-[13px] font-medium ${mutedTextClass}`}>
+                        視像或配合圖文資料提供諮詢／建議原因欄
+                      </div>
+                      <select
+                        className={selectClass}
+                        value={materialsReasonColumn}
+                        onChange={(event) => setMaterialsReasonColumn(event.target.value)}
+                        disabled={materialsReasonOptions.length === 0}
+                      >
+                        <option value="">請選擇欄位</option>
+                        {materialsReasonOptions.map((column) => (
+                          <option key={column.column} value={column.column}>
+                            {column.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
 
                   <div className={`mt-3 text-[12px] leading-5 ${mutedTextClass}`}>
                     {columnCandidates.length > 0
-                      ? `已識別 ${columnCandidates.length} 個「直接服務」候選欄位，優先選取符合 ${monthShortLabel} / 個別 / 直接服務的欄位。`
+                      ? `已識別 ${columnCandidates.length} 個「直接服務」候選欄位，優先選取符合 ${monthShortLabel} / 個別 / 直接服務的欄位。教材欄位只在高信心（符合目標月份）時自動選取，其餘請手動選擇。`
                       : "未能自動識別候選欄位，請手動選擇欄位。"}
                   </div>
+
+                  {exportGate.blockReason ? (
+                    <div className="mt-3 rounded-2xl bg-red-500/10 px-4 py-3 text-[13px] text-red-500">
+                      {exportGate.blockReason}
+                    </div>
+                  ) : exportGate.degradeNotice ? (
+                    <div
+                      className={`mt-3 rounded-2xl px-4 py-3 text-[13px] ${
+                        isDark ? "bg-amber-900/20 text-amber-400" : "bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {exportGate.degradeNotice}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1717,9 +2062,22 @@ export default function DataPage({
                   <table className="min-w-full border-separate border-spacing-0 text-left text-[13px]">
                     <thead>
                       <tr>
-                        {["學生", "生日", "Excel 行", "欄位", "原本值", "將填入數字"].map((label) => (
+                        {[
+                          "學生",
+                          "生日",
+                          "Excel 行",
+                          "直接服務欄",
+                          "原本值",
+                          "將填入",
+                          "教材次數欄",
+                          "原本值",
+                          "將填入",
+                          "原因欄",
+                          "原本值",
+                          "將填入",
+                        ].map((label, index) => (
                           <th
-                            key={label}
+                            key={`${label}-${index}`}
                             className={`border-b px-3 py-3 font-semibold first:rounded-tl-2xl last:rounded-tr-2xl ${tableHeadClass}`}
                           >
                             {label}
@@ -1729,32 +2087,64 @@ export default function DataPage({
                     </thead>
                     <tbody>
                       {matchedRows.length > 0 ? (
-                        matchedRows.map((row) => (
-                          <tr key={row.student.id}>
-                            <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
-                              {row.student.name}
-                            </td>
-                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
-                              {row.student.birthday || "-"}
-                            </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                              {row.excelRow}
-                            </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
-                              {row.cellAddress}
-                            </td>
-                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
-                              {row.originalValue}
-                            </td>
-                            <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
-                              {row.value}
-                            </td>
-                          </tr>
-                        ))
+                        matchedRows.map((row) => {
+                          const materialsFill =
+                            !row.materials
+                              ? "—"
+                              : row.materials.value === null
+                              ? "不寫入（保留原值）"
+                              : String(row.materials.value);
+                          const reasonFill =
+                            !row.materialsReason
+                              ? "—"
+                              : row.materialsReason.value === ""
+                              ? "不寫入（保留原值）"
+                              : row.materialsReason.value;
+                          return (
+                            <tr key={row.student.id}>
+                              <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
+                                {row.student.name}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                                {row.student.birthday || "-"}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {row.excelRow}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {row.cellAddress}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                                {row.originalValue}
+                              </td>
+                              <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
+                                {row.value}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {row.materials ? row.materials.cellAddress : "—"}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                                {row.materials ? row.materials.originalValue : "—"}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {materialsFill}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {row.materialsReason ? row.materialsReason.cellAddress : "—"}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                                {row.materialsReason ? row.materialsReason.originalValue : "—"}
+                              </td>
+                              <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                                {reasonFill}
+                              </td>
+                            </tr>
+                          );
+                        })
                       ) : (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={12}
                             className={`border-b px-3 py-8 text-center ${mutedTextClass} ${tableCellClass}`}
                           >
                             載入模板並選擇欄位後，這裡會顯示將填入的資料。
@@ -1800,7 +2190,9 @@ export default function DataPage({
               ["即將寫入", `${matchedRows.length} 筆資料`],
               ["工作表", selectedSheetName || "—"],
               ["目標月份", monthLabel],
-              ["目標欄位", exportTargetColumn],
+              ["直接服務欄", exportTargetColumn],
+              ["教材次數欄", materialsColumn || "未設定"],
+              ["原因欄", materialsReasonColumn || "未設定"],
               ["成功匹配", matchedRows.length],
               ["未匹配", unmatchedStudents.length],
               ["多重匹配", duplicatedMatches.length],

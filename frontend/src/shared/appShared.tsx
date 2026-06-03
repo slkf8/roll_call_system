@@ -176,6 +176,46 @@ export function countReason6ForStudent(
   ).length;
 }
 
+// --- Materials reason string (教材原因欄) ---
+
+// Strict "<day>-<code>" pairs joined by ";": day 1-31 (no leading zero),
+// code 1-6, no spaces. Mirrors the backend MATERIALS_REASON_PATTERN exactly.
+export const MATERIALS_REASON_MAX_LEN = 1024;
+const MATERIALS_REASON_PATTERN =
+  /^(?:[1-9]|[12]\d|3[01])-[1-6](?:;(?:[1-9]|[12]\d|3[01])-[1-6])*$/;
+
+// Pre-flight validator shared by backend export + xlsx-populate fallback.
+// Empty string is NOT valid (skip-write is decided separately by the caller).
+export function isValidMaterialsReasonString(value: string): boolean {
+  return value.length <= MATERIALS_REASON_MAX_LEN && MATERIALS_REASON_PATTERN.test(value);
+}
+
+// Build the materials reason cell value for one student within a target month.
+// Only absent + provided + code 1-6 sessions in range; day not zero-padded;
+// sorted by dateISO then start; same-day duplicates kept; ";"-joined; no spaces.
+// Returns "" when there is no valid materials record.
+export function buildMaterialsReasonString(
+  studentSessions: Session[],
+  monthStartISO: string,
+  monthEndISO: string
+): string {
+  return studentSessions
+    .filter(
+      (s) =>
+        s.dateISO >= monthStartISO &&
+        s.dateISO <= monthEndISO &&
+        s.status === "absent" &&
+        s.materialsProvided === true &&
+        s.materialsReasonCode != null &&
+        s.materialsReasonCode >= 1 &&
+        s.materialsReasonCode <= 6
+    )
+    .slice()
+    .sort((a, b) => a.dateISO.localeCompare(b.dateISO) || a.start.localeCompare(b.start))
+    .map((s) => `${parseInt(s.dateISO.slice(8, 10), 10)}-${s.materialsReasonCode}`)
+    .join(";");
+}
+
 // Replace a saved session by id (or append when new), so the reason-6 count is
 // computed from the effective post-save sessions — never "current + 1".
 export function applySessionToList(list: Session[], saved: Session): Session[] {

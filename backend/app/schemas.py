@@ -37,6 +37,12 @@ def normalize_materials(
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 CELL_ADDRESS_PATTERN = re.compile(r"^[A-Za-z]{1,3}[1-9][0-9]*$")
+# Materials reason string: "<day>-<code>" pairs joined by ";".
+# day 1-31 (no leading zero), code 1-6, no spaces. e.g. "3-4;18-2".
+MATERIALS_REASON_PATTERN = re.compile(
+    r"^(?:[1-9]|[12]\d|3[01])-[1-6](?:;(?:[1-9]|[12]\d|3[01])-[1-6])*$"
+)
+MATERIALS_REASON_MAX_LEN = 1024
 
 
 def _trim_name(value: str) -> str:
@@ -386,7 +392,7 @@ class MonthlyStatisticsRead(BaseModel):
 
 class ExcelFillWrite(BaseModel):
     cellAddress: str
-    value: int | float
+    value: int | float | str
     studentId: int | None = None
     studentName: str | None = None
     birthday: str | None = None
@@ -403,11 +409,22 @@ class ExcelFillWrite(BaseModel):
     @field_validator("value", mode="before")
     @classmethod
     def validate_value(cls, value):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError("value must be a number")
-        if not math.isfinite(float(value)):
-            raise ValueError("value must be a finite number")
-        return value
+        # Reject bool explicitly (bool is an int subclass in Python).
+        if isinstance(value, bool):
+            raise ValueError("value must be a number or a materials reason string")
+        if isinstance(value, (int, float)):
+            if not math.isfinite(float(value)):
+                raise ValueError("value must be a finite number")
+            return value
+        # Strings are only allowed for the materials reason cell and must match
+        # the strict "<day>-<code>" format (no arbitrary text / formulas).
+        if isinstance(value, str):
+            if len(value) > MATERIALS_REASON_MAX_LEN:
+                raise ValueError("value string exceeds maximum length")
+            if not MATERIALS_REASON_PATTERN.fullmatch(value):
+                raise ValueError("value string must be a valid materials reason string")
+            return value
+        raise ValueError("value must be a number or a materials reason string")
 
 
 class ExcelFillOptions(BaseModel):

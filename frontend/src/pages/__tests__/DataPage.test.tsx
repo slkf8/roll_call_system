@@ -17,6 +17,11 @@ import type {
   StudentProfile,
   StudentScheduleRule,
 } from "../../shared/appShared";
+import {
+  buildMaterialsReasonString,
+  isValidMaterialsReasonString,
+  MATERIALS_REASON_MAX_LEN,
+} from "../../shared/appShared";
 
 vi.mock("../../api/statisticsApi", () => ({
   fetchMonthlyStatistics: vi.fn(),
@@ -316,34 +321,55 @@ function workbookToFile(workbook: XLSX.WorkBook, filename: string) {
 // 3人小組) each with 直接服務 + 視像 leaves, plus a 備註 column. No real
 // student data is included; the few visible names match other synthetic
 // fixtures already in this file.
-function createOfficialLikeTemplateWorkbook() {
+// Mirrors the real official monthly-statistics template: a 3-row hierarchical
+// header where every month is a 7-column block:
+//   +0 個別>直接服務     +1 個別>出席會議   +2 個別>視像
+//   +3 個別>配合圖文資料提供諮詢/建議
+//   +4 2人小組>直接服務  +5 3人小組>直接服務
+//   +6 視像或配合圖文資料提供諮詢/建議原因 (row2:row3 merged)
+// Real layout: 9月 O..U, 10月 V..AB, 11月 AC..AI. No real student data.
+function createOfficialLikeTemplateWorkbook({
+  slash = "/",
+  includeTargetMonth = true,
+}: { slash?: "/" | "／"; includeTargetMonth?: boolean } = {}) {
   const worksheet: XLSX.WorkSheet = {};
+  const consult = `配合圖文資料提供諮詢${slash}建議`;
+  const reasonLabel = `視像或配合圖文資料提供諮詢${slash}建議原因`;
 
   const colAt = (start: string, offset: number) =>
     XLSX.utils.encode_col(XLSX.utils.decode_col(start) + offset);
 
-  const months: Array<{ label: string; startCol: string; endCol: string }> = [
-    { label: "9月各情況次數", startCol: "P", endCol: "V" },
-    { label: "10月各情況次數", startCol: "W", endCol: "AC" },
-    { label: "11月各情況次數", startCol: "AD", endCol: "AJ" },
+  const allMonths: Array<{ label: string; startCol: string }> = [
+    { label: "9月各情況次數", startCol: "O" },
+    { label: "10月各情況次數", startCol: "V" },
+    { label: "11月各情況次數", startCol: "AC" },
   ];
+  // Target month (selectedDate default = 2026-11). Dropping it lets us assert
+  // that medium/low materials candidates are NOT auto-selected.
+  const months = includeTargetMonth ? allMonths : allMonths.slice(0, 2);
+
+  const merges: XLSX.Range[] = [];
 
   for (const m of months) {
-    setCell(worksheet, `${m.startCol}1`, m.label);
-    // Row 2 -- subgroups (each subgroup spans 2 leaf columns; +1 備註)
-    setCell(worksheet, `${colAt(m.startCol, 0)}2`, "個別");
-    setCell(worksheet, `${colAt(m.startCol, 2)}2`, "2人小組");
-    setCell(worksheet, `${colAt(m.startCol, 4)}2`, "3人小組");
-    setCell(worksheet, `${colAt(m.startCol, 6)}2`, "備註");
-    // Row 3 -- leaf labels (3 pairs of 直接服務 + 視像-style note)
-    for (let i = 0; i < 6; i += 2) {
-      setCell(worksheet, `${colAt(m.startCol, i)}3`, "直接服務");
-      setCell(
-        worksheet,
-        `${colAt(m.startCol, i + 1)}3`,
-        "視像或配合圖文資料提供諮詢/建議原因"
-      );
-    }
+    const c = (offset: number) => colAt(m.startCol, offset);
+    // Row 1: month label merged across the whole 7-column block.
+    setCell(worksheet, `${c(0)}1`, m.label);
+    merges.push(XLSX.utils.decode_range(`${c(0)}1:${c(6)}1`));
+    // Row 2: 個別 spans the first 4 leaf columns; 2人小組 / 3人小組 single;
+    // the reason column label spans row2:row3.
+    setCell(worksheet, `${c(0)}2`, "個別");
+    merges.push(XLSX.utils.decode_range(`${c(0)}2:${c(3)}2`));
+    setCell(worksheet, `${c(4)}2`, "2人小組");
+    setCell(worksheet, `${c(5)}2`, "3人小組");
+    setCell(worksheet, `${c(6)}2`, reasonLabel);
+    merges.push(XLSX.utils.decode_range(`${c(6)}2:${c(6)}3`));
+    // Row 3: leaf labels.
+    setCell(worksheet, `${c(0)}3`, "直接服務");
+    setCell(worksheet, `${c(1)}3`, "出席會議");
+    setCell(worksheet, `${c(2)}3`, "視像");
+    setCell(worksheet, `${c(3)}3`, consult);
+    setCell(worksheet, `${c(4)}3`, "直接服務");
+    setCell(worksheet, `${c(5)}3`, "直接服務");
   }
 
   // Entity-level leaf labels (row 3, same convention as the basic synthetic).
@@ -358,10 +384,9 @@ function createOfficialLikeTemplateWorkbook() {
   setCell(worksheet, "C8", "王家朗");
   setCell(worksheet, "E8", dateToExcelSerial("2012-03-08"));
 
-  worksheet["!ref"] = "A1:AJ8";
-  worksheet["!merges"] = months.map((m) =>
-    XLSX.utils.decode_range(`${m.startCol}1:${m.endCol}1`)
-  );
+  const lastCol = colAt(months[months.length - 1].startCol, 6);
+  worksheet["!ref"] = `A1:${lastCol}8`;
+  worksheet["!merges"] = merges;
 
   return {
     SheetNames: ["Sheet1"],
@@ -369,10 +394,38 @@ function createOfficialLikeTemplateWorkbook() {
   } satisfies XLSX.WorkBook;
 }
 
-function officialLikeWorkbookToFile() {
+function officialLikeWorkbookToFile(
+  options: { slash?: "/" | "／"; includeTargetMonth?: boolean } = {}
+) {
   // Keep the original filename so the UI assertion below still matches.
-  return workbookToFile(createOfficialLikeTemplateWorkbook(), "official-template.xlsx");
+  return workbookToFile(createOfficialLikeTemplateWorkbook(options), "official-template.xlsx");
 }
+
+// One absent + materials-provided session for a student in 2026-11.
+function matSession(
+  id: number,
+  studentId: number,
+  dateISO: string,
+  start: string,
+  code: 1 | 2 | 3 | 4 | 5 | 6 | null,
+  provided = true
+): Session {
+  return {
+    id,
+    studentId,
+    student: { id: studentId, name: "" },
+    dateISO,
+    start,
+    durationMin: 60,
+    status: "absent",
+    kind: "regular",
+    materialsProvided: provided,
+    materialsReasonCode: code,
+  };
+}
+
+const getMaterialsSelect = () => screen.getByLabelText(/教材次數/) as HTMLSelectElement;
+const getReasonSelect = () => screen.getByLabelText(/建議原因欄/) as HTMLSelectElement;
 
 async function uploadTemplate(
   user: ReturnType<typeof userEvent.setup>,
@@ -911,6 +964,244 @@ describe("DataPage", () => {
     const optionTexts = Array.from(directServiceSelect.options).map((option) => option.textContent ?? "");
     expect(optionTexts.some((text) => text.includes("直接服務"))).toBe(true);
     expect(optionTexts.some((text) => text.includes("11月"))).toBe(true);
+  });
+
+  // ------------------------------------------------------------
+  // Phase 2：教材欄位偵測 / 預覽 / 匯出 / 原因 formatter
+  // ------------------------------------------------------------
+
+  describe("materials reason formatter", () => {
+    it("orders pairs by date then start, keeps same-day duplicates, no spaces", () => {
+      const sessions = [
+        matSession(1, 1, "2026-11-18", "10:00", 2),
+        matSession(2, 1, "2026-11-03", "09:00", 4),
+        matSession(3, 1, "2026-11-03", "14:00", 4), // same day duplicate kept
+      ];
+      expect(buildMaterialsReasonString(sessions, "2026-11-01", "2026-11-30")).toBe("3-4;3-4;18-2");
+    });
+
+    it("excludes out-of-month / present / not-provided / invalid-code sessions", () => {
+      const sessions = [
+        matSession(1, 1, "2026-10-31", "09:00", 4), // out of month
+        matSession(2, 1, "2026-11-05", "09:00", null), // missing code
+        matSession(3, 1, "2026-11-06", "09:00", 4, false), // not provided
+        { ...matSession(4, 1, "2026-11-07", "09:00", 4), status: "present" as const },
+        matSession(5, 1, "2026-11-08", "09:00", 3), // valid
+      ];
+      expect(buildMaterialsReasonString(sessions, "2026-11-01", "2026-11-30")).toBe("8-3");
+    });
+
+    it("returns empty string when there is no valid materials record", () => {
+      expect(buildMaterialsReasonString([], "2026-11-01", "2026-11-30")).toBe("");
+    });
+
+    it("validates reason strings the same way the backend does", () => {
+      expect(isValidMaterialsReasonString("3-4")).toBe(true);
+      expect(isValidMaterialsReasonString("3-4;18-2")).toBe(true);
+      expect(isValidMaterialsReasonString("")).toBe(false);
+      expect(isValidMaterialsReasonString("3-7")).toBe(false);
+      expect(isValidMaterialsReasonString("0-4")).toBe(false);
+      expect(isValidMaterialsReasonString("32-4")).toBe(false);
+      expect(isValidMaterialsReasonString("3-4;")).toBe(false);
+      expect(isValidMaterialsReasonString("生病")).toBe(false);
+      expect(isValidMaterialsReasonString(";".padEnd(MATERIALS_REASON_MAX_LEN + 10, "3-4;3-4"))).toBe(
+        false
+      );
+    });
+  });
+
+  it("auto-detects all three target columns by high confidence", async () => {
+    const { user, container } = renderDataPage();
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+
+    expect(getSelect("個別 / 直接服務欄").value).toBe("AC");
+    expect(getMaterialsSelect().value).toBe("AF");
+    expect(getReasonSelect().value).toBe("AI");
+  });
+
+  it("does not auto-select medium/low materials candidates (high only)", async () => {
+    const { user, container } = renderDataPage();
+    // Target month (11月) absent → only 9月/10月 materials columns exist.
+    await uploadTemplate(user, container, officialLikeWorkbookToFile({ includeTargetMonth: false }));
+
+    expect(getMaterialsSelect().value).toBe("");
+    expect(getReasonSelect().value).toBe("");
+    // The columns are still offered for manual selection.
+    const matOptions = Array.from(getMaterialsSelect().options).map((o) => o.textContent ?? "");
+    expect(matOptions.some((t) => t.includes("配合圖文資料提供諮詢"))).toBe(true);
+  });
+
+  it("normalizes full-width ／ to half-width / when detecting columns", async () => {
+    const { user, container } = renderDataPage();
+    await uploadTemplate(user, container, officialLikeWorkbookToFile({ slash: "／" }));
+
+    expect(getMaterialsSelect().value).toBe("AF");
+    expect(getReasonSelect().value).toBe("AI");
+  });
+
+  it("does not match 11月 columns when the target month is 1月", async () => {
+    const ws: XLSX.WorkSheet = {};
+    setCell(ws, "C3", "姓名");
+    setCell(ws, "E3", "出生日期");
+    setCell(ws, "H1", "11月各情況次數");
+    setCell(ws, "H2", "個別");
+    setCell(ws, "H3", "直接服務");
+    setCell(ws, "J1", "1月各情況次數");
+    setCell(ws, "J2", "個別");
+    setCell(ws, "J3", "直接服務");
+    setCell(ws, "C6", "陳小明");
+    setCell(ws, "E6", "08/03/2012");
+    ws["!ref"] = "A1:J6";
+    const wb = { SheetNames: ["Sheet1"], Sheets: { Sheet1: ws } } satisfies XLSX.WorkBook;
+
+    const { user, container } = renderDataPage({ initialSelectedDate: "2026-01-15" });
+    await uploadTemplate(user, container, workbookToFile(wb, "jan-template.xlsx"));
+
+    expect(getSelect("個別 / 直接服務欄").value).toBe("J");
+  });
+
+  it("allows manually switching the materials columns", async () => {
+    const { user, container } = renderDataPage();
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+
+    await user.selectOptions(getMaterialsSelect(), "Y"); // 10月 個別 配合圖文
+    expect(getMaterialsSelect().value).toBe("Y");
+  });
+
+  it("previews three columns and skips writes when a student has no materials", async () => {
+    const sessions = [
+      matSession(1, 1, "2026-11-03", "09:00", 4),
+      matSession(2, 1, "2026-11-18", "10:00", 2),
+    ]; // 陳小明 (id 1) has materials; others have none
+    const { user, container } = renderDataPage({ initialSessions: sessions });
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+    await waitFor(() => expect(getValueNearLabel("成功匹配").getByText("3")).toBeInTheDocument());
+
+    const officialSection = getSectionByHeading("官方 Excel 模板填寫");
+    const chenRow = await waitFor(() => getRowByCell(officialSection, "AF6"));
+    expect(within(chenRow).getByText("2")).toBeInTheDocument(); // materials count
+    expect(within(chenRow).getByText("3-4;18-2")).toBeInTheDocument(); // reason
+
+    const leeRow = getRowByCell(officialSection, "AF7");
+    expect(within(leeRow).getAllByText("不寫入（保留原值）").length).toBe(2);
+  });
+
+  it("writes materials count and reason consistently via backend then fallback", async () => {
+    const sessions = [
+      matSession(1, 1, "2026-11-03", "09:00", 4),
+      matSession(2, 1, "2026-11-18", "10:00", 2),
+    ];
+    const { user, container, snapshot } = renderDataPage({ initialSessions: sessions });
+    let exportedBlob: Blob | null = null;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlob = blob;
+        return "blob:mock";
+      }),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+    await waitFor(() => expect(getValueNearLabel("成功匹配").getByText("3")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+    await user.click(screen.getByRole("button", { name: "確認匯出" }));
+
+    // Backend received the materials + reason writes.
+    await waitFor(() => expect(fillExcelTemplate).toHaveBeenCalled());
+    const payload = vi.mocked(fillExcelTemplate).mock.calls[0][1];
+    expect(payload.writes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cellAddress: "AC6", value: 0, reason: "direct_service_count" }),
+        expect.objectContaining({ cellAddress: "AF6", value: 2, reason: "materials_count" }),
+        expect.objectContaining({ cellAddress: "AI6", value: "3-4;18-2", reason: "materials_reason" }),
+      ])
+    );
+    // No materials writes for students without materials.
+    expect(payload.writes.some((w) => w.cellAddress === "AF7")).toBe(false);
+    expect(payload.writes.some((w) => w.cellAddress === "AI7")).toBe(false);
+
+    // Backend mock rejects (beforeEach) → fallback produced the same three cells.
+    await waitFor(() => expect(snapshot.toasts).toContain("後端匯出失敗，已使用本地匯出"));
+    await waitFor(() => expect(exportedBlob).not.toBeNull());
+    const blob = exportedBlob;
+    if (!blob) throw new Error("Expected exported blob");
+    const exported = await readExportedWorkbook(blob);
+    const ws = exported.Sheets.Sheet1;
+    expect(ws.AC6.v).toBe(0);
+    expect(ws.AF6.v).toBe(2);
+    expect(ws.AI6.v).toBe("3-4;18-2");
+    expect(ws.AF7).toBeUndefined();
+    expect(ws.AI7).toBeUndefined();
+  });
+
+  it("blocks export when materials exist but a target column is missing", async () => {
+    const sessions = [matSession(1, 1, "2026-11-03", "09:00", 4)];
+    const { user, container, snapshot } = renderDataPage({ initialSessions: sessions });
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+
+    await user.selectOptions(getReasonSelect(), ""); // remove reason column
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+
+    expect(screen.queryByText("匯出前確認")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain(
+        "本月存在教材服務，但尚未設定完整的教材次數欄與原因欄。請選擇對應欄位後再匯出。"
+      )
+    );
+  });
+
+  it("blocks export when two target columns collide", async () => {
+    const sessions = [matSession(1, 1, "2026-11-03", "09:00", 4)];
+    const { user, container, snapshot } = renderDataPage({ initialSessions: sessions });
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+
+    await user.selectOptions(getMaterialsSelect(), "AC"); // same as direct service
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+
+    expect(screen.queryByText("匯出前確認")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain(
+        "直接服務欄、教材次數欄與原因欄不能使用同一個 Excel 欄位。"
+      )
+    );
+  });
+
+  it("blocks export when a flagged materials session has an invalid reason code", async () => {
+    const sessions = [matSession(1, 1, "2026-11-03", "09:00", null)]; // provided but no code
+    const { user, container, snapshot } = renderDataPage({ initialSessions: sessions });
+    await uploadTemplate(user, container, officialLikeWorkbookToFile());
+
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+
+    expect(screen.queryByText("匯出前確認")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain("部分教材服務缺少有效申報原因，請先檢查教材紀錄。")
+    );
+  });
+
+  it("allows direct-only export with a notice when no materials and columns missing", async () => {
+    // Basic synthetic template has no materials columns; default sessions have
+    // no materials → degrade to direct-only.
+    const { user, container, snapshot } = renderDataPage();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:mock") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    const file = workbookToFile(createSyntheticTemplateWorkbook(), "synthetic-template.xlsx");
+    await uploadTemplate(user, container, file);
+    await waitFor(() => expect(getValueNearLabel("成功匹配").getByText("3")).toBeInTheDocument());
+
+    expect(
+      screen.getByText("未偵測到教材相關欄位。本月沒有教材服務，將只填寫直接服務欄位。")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "匯出並填入官方模板" }));
+    expect(screen.getByText("匯出前確認")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "確認匯出" }));
+    await waitFor(() => expect(snapshot.toasts).toContain("已匯出並填入 3 筆資料"));
   });
 
   // ------------------------------------------------------------

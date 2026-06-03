@@ -163,9 +163,121 @@ def test_null_value_returns_400():
 
 
 def test_non_number_value_returns_400():
+    # Plain "4" is not a valid materials reason string ("<day>-<code>") either.
     response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "4"}]))
 
     assert response.status_code == 400
+
+
+def test_valid_reason_string_can_be_written():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "3-4"}]))
+
+    assert response.status_code == 200, response.text
+    workbook = load_response_workbook(response)
+    assert workbook["Sheet1"]["A1"].value == "3-4"
+
+
+def test_multiple_reason_pairs_can_be_written():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "3-4;18-2"}]))
+
+    assert response.status_code == 200, response.text
+    workbook = load_response_workbook(response)
+    assert workbook["Sheet1"]["A1"].value == "3-4;18-2"
+
+
+def test_same_day_duplicate_reason_pairs_can_be_written():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "3-4;3-4"}]))
+
+    assert response.status_code == 200, response.text
+    workbook = load_response_workbook(response)
+    assert workbook["Sheet1"]["A1"].value == "3-4;3-4"
+
+
+def test_boolean_value_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": True}]))
+
+    assert response.status_code == 400
+
+
+def test_arbitrary_text_value_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "生病"}]))
+
+    assert response.status_code == 400
+
+
+def test_empty_string_value_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": ""}]))
+
+    assert response.status_code == 400
+
+
+def test_formula_like_string_value_returns_400():
+    for formula in ("=SUM(A1:A3)", "+1+1", "@formula"):
+        response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": formula}]))
+        assert response.status_code == 400, formula
+
+
+def test_reason_code_out_of_range_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "3-7"}]))
+
+    assert response.status_code == 400
+
+
+def test_trailing_semicolon_reason_string_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "3-4;"}]))
+
+    assert response.status_code == 400
+
+
+def test_reason_string_over_max_length_returns_400():
+    long_value = ";".join(["3-4"] * 300)  # well over 1024 chars
+    assert len(long_value) > 1024
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": long_value}]))
+
+    assert response.status_code == 400
+
+
+def test_zero_day_reason_string_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "0-4"}]))
+
+    assert response.status_code == 400
+
+
+def test_leading_zero_day_reason_string_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "00-4"}]))
+
+    assert response.status_code == 400
+
+
+def test_day_above_31_reason_string_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "32-4"}]))
+
+    assert response.status_code == 400
+
+
+def test_two_digit_day_above_31_reason_string_returns_400():
+    response = post_export(payload=base_payload(writes=[{"cellAddress": "A1", "value": "99-6"}]))
+
+    assert response.status_code == 400
+
+
+def test_preserves_style_when_writing_reason_string():
+    response = post_export(
+        payload=base_payload(
+            writes=[
+                {"cellAddress": "C3", "value": 4},
+                {"cellAddress": "A1", "value": "3-4;18-2"},
+            ]
+        )
+    )
+
+    assert response.status_code == 200, response.text
+    workbook = load_response_workbook(response)
+    assert workbook["Sheet1"]["A1"].value == "3-4;18-2"
+    assert workbook["Sheet1"]["A1"].font.bold is True
+    assert workbook["Sheet1"]["A1"].fill.fgColor.rgb == "00FFFF00"
+    assert workbook["Sheet1"]["B2"].value == "保留"
+    assert workbook["Sheet1"].column_dimensions["A"].width == 24
 
 
 def test_preserves_other_cell_values():
