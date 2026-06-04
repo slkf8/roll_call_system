@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import _is_packaged, get_allowed_origins, get_data_dir, get_frontend_dist_dir
 from app.database import init_db
 from app.routers import exports, global_events, schedule_rules, sessions, statistics, students
-from app.services import backup_service
+from app.services import app_lock, backup_service
 
 
 @asynccontextmanager
@@ -19,22 +19,45 @@ async def lifespan(_app: FastAPI):
     backup_enabled = backup_service.backup_enabled()
     preflight_enabled = backup_service.primary_db_preflight_enabled()
 
-    # Guard against silently re-creating a lost primary DB (independent of
-    # the backup scheduler). Runs before init_db; may raise to abort startup.
-    if preflight_enabled:
-        backup_service.preflight_primary_db(backup_data_dir)
+    # Acquire the port-independent lifecycle lock BEFORE any DB initialization.
+    # Held for the entire lifespan and released only after the shutdown final
+    # refresh. A held lock means another instance is already running against
+    # this data dir -> fail fast rather than corrupt shared state. (Disabled
+    # only in tests via ROLL_CALL_ENABLE_APP_LOCK=0.)
+    lock = None
+    if app_lock.app_lock_enabled():
+        lock = app_lock.AppLock(backup_data_dir)
+        if not lock.acquire():
+            raise RuntimeError(
+                "Another Roll Call backend instance is already running "
+                f"(lock held: {backup_data_dir / app_lock.LOCK_FILENAME}). "
+                "Refusing to start a second instance against the same data "
+                "directory."
+            )
 
-    init_db()
-
-    scheduler = None
-    if backup_enabled:
-        backup_service.install_mutation_hooks()
-        scheduler = await backup_service.start(backup_data_dir)
     try:
-        yield
+        # Guard against silently re-creating a lost primary DB (independent of
+        # the backup scheduler). Runs before init_db; may raise to abort startup.
+        if preflight_enabled:
+            backup_service.preflight_primary_db(backup_data_dir)
+
+        init_db()
+
+        scheduler = None
+        if backup_enabled:
+            backup_service.install_mutation_hooks()
+            scheduler = await backup_service.start(backup_data_dir)
+        try:
+            yield
+        finally:
+            # Shutdown final refresh happens here, while the lock is still held.
+            if scheduler is not None:
+                await backup_service.stop(scheduler)
     finally:
-        if scheduler is not None:
-            await backup_service.stop(scheduler)
+        # Release the lifecycle lock last, after the final refresh. Also runs
+        # if startup failed mid-way (preflight/init_db/scheduler raise).
+        if lock is not None:
+            lock.release()
 
 
 app = FastAPI(title="Roll Call Backend", version="0.1.0", lifespan=lifespan)
