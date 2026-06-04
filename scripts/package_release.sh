@@ -58,6 +58,8 @@ BINARY_SRC="$BUNDLE_SRC/roll_call_backend"
 RELEASE_ROOT="$REPO_ROOT/release"
 RELEASE_NAME="RollCall_Portable_macOS"
 RELEASE_DIR="$RELEASE_ROOT/$RELEASE_NAME"
+MAINT_SRC="$SCRIPT_DIR/maintenance_restore.command"
+MAINT_DEST_NAME="RollCall 資料回復工具.command"
 
 log() { echo ""; echo "==> $*"; }
 
@@ -66,6 +68,12 @@ if [ ! -x "$BINARY_SRC" ]; then
   echo "ERROR: PyInstaller binary not found at:" >&2
   echo "  $BINARY_SRC" >&2
   echo "Run ./scripts/build_binary.sh first." >&2
+  exit 1
+fi
+
+if [ ! -f "$MAINT_SRC" ]; then
+  echo "ERROR: maintenance wrapper not found at:" >&2
+  echo "  $MAINT_SRC" >&2
   exit 1
 fi
 
@@ -113,6 +121,14 @@ fi
 rm -rf -- "$STAGING_DATA_DIR"
 mkdir -p -- "$STAGING_DATA_DIR/backups"
 echo "  (release ships with empty data/ and data/backups/)"
+
+# ---------- Maintenance (repair-only) wrapper ----------
+# A thin .command that only drives the binary CLI (list/validate/restore/
+# history). All DB safety stays in the binary; this just adds a menu entry.
+log "Adding maintenance tool..."
+mkdir -p "$STAGING_DIR/maintenance"
+cp "$MAINT_SRC" "$STAGING_DIR/maintenance/$MAINT_DEST_NAME"
+chmod +x "$STAGING_DIR/maintenance/$MAINT_DEST_NAME"
 
 # ---------- Promote staging to the real release folder ----------
 mv "$STAGING_DIR" "$RELEASE_DIR"
@@ -256,6 +272,21 @@ cat > "$RELEASE_DIR/README.txt" <<'README_EOF'
   - API 文件：http://127.0.0.1:8000/docs
   - 健康檢查：http://127.0.0.1:8000/health
   - 啟動失敗時，請把 Terminal 視窗中紅色錯誤訊息整段截圖回報。
+
+────────────────────────────────────────
+十一、維修：資料回復工具（進階）
+────────────────────────────────────────
+  日常使用請照舊雙擊「啟動 RollCall.command」，不需要這個工具。
+
+  萬一需要把資料庫回復到某個自動備份時：
+    1. 先正常停止 RollCall（在啟動視窗按 Ctrl+C，並關閉該視窗）。
+    2. 開啟 maintenance/「RollCall 資料回復工具.command」。
+    3. 依選單可「列出備份 / 驗證備份 / 回復備份 / 查看回復紀錄」。
+    4. 回復前系統會自動建立 emergency backup（app_before_restore_...），
+       再以原子方式替換 app.db；若回復後驗證失敗會自動回退。
+
+  首次開啟這個 .command 若被 macOS 擋下（無法驗證開發者），
+  請在 Finder 對它按住 Control → 點「打開」→ 再點一次「打開」。
 README_EOF
 
 # ---------- Summary ----------
