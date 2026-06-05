@@ -36,7 +36,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from app.config import get_data_dir, get_host, get_port
+from app.config import data_dir_fingerprint, get_data_dir, get_host, get_port
 from app.services import backup_service as bs
 from app.services.app_lock import AppLock
 
@@ -85,6 +85,10 @@ class RestoreRollbackError(RestoreError):
         super().__init__(message)
         self.emergency = emergency
         self.rollback_result = rollback_result
+
+
+# ``data_dir_fingerprint`` is the shared helper from app.config (re-exported
+# here for callers/tests that reference it via this module).
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +203,28 @@ def _verify_restored_primary(primary: Path) -> None:
 # Running-app detection (never kills a process)
 # ---------------------------------------------------------------------------
 
+_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _is_valid_fingerprint(value: object) -> bool:
+    """True only for a well-formed 16-char lowercase-hex fingerprint string."""
+    return isinstance(value, str) and _FINGERPRINT_RE.fullmatch(value) is not None
+
+
 def _service_health_running(data_dir: Path) -> bool:
-    """True if the backend health endpoint answers on the configured host/port."""
+    """True if /health indicates restore must be blocked for this data dir.
+
+    Blocks when the responder is a RollCall instance that either (a) serves the
+    same data directory (fingerprint match), or (b) is an older / unidentifiable
+    instance predating the fingerprint (legacy ``{"ok": true}``) — the latter is
+    refused conservatively because such versions also lack the lifecycle lock.
+
+    Does NOT block (advisory only) for: a different data dir, a non-RollCall 200
+    response, a non-200 status, unparseable JSON, or a connection failure. The
+    lifecycle lock and SQLite exclusive-lock probe remain the authoritative
+    same-dir gates.
+    """
+    target_fingerprint = data_dir_fingerprint(data_dir)
     try:
         host = get_host()
         if host in ("0.0.0.0", "::"):
@@ -211,7 +235,29 @@ def _service_health_running(data_dir: Path) -> bool:
     url = f"http://{host}:{port}/health"
     try:
         with urllib.request.urlopen(url, timeout=_HEALTH_TIMEOUT_SECONDS) as resp:
-            return getattr(resp, "status", resp.getcode()) == 200
+            status = getattr(resp, "status", None)
+            if status is None:
+                status = resp.getcode()
+            if status != 200:
+                return False
+            try:
+                payload = json.loads(resp.read().decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return False  # not JSON -> cannot identify -> advisory
+            if not isinstance(payload, dict) or payload.get("ok") is not True:
+                return False  # not a RollCall health response -> advisory
+            fingerprint = payload.get("dataDirFingerprint")
+            if not _is_valid_fingerprint(fingerprint):
+                # Missing / null / non-string / empty / wrong-length / non-hex:
+                # legacy or unidentifiable instance whose data dir cannot be
+                # confirmed -> refuse conservatively (such versions also predate
+                # the lifecycle lock).
+                logger.warning(
+                    "health responder has no usable dataDirFingerprint "
+                    "(legacy/unidentifiable); blocking restore conservatively"
+                )
+                return True
+            return fingerprint == target_fingerprint
     except Exception:
         return False
 
@@ -241,8 +287,10 @@ def _db_write_locked(primary: Path) -> bool:
 def _ensure_app_not_running(data_dir: Path) -> None:
     if _service_health_running(data_dir):
         raise RestoreError(
-            "service appears to be running (health endpoint responded); "
-            "stop it before restoring."
+            "restore refused by health check: a RollCall instance is responding "
+            "for this data directory, or an older / unidentifiable instance could "
+            "not be confirmed safe (stop that instance and retry). "
+            "Do not kill any process."
         )
     if _db_write_locked(bs._primary_db(data_dir)):
         raise RestoreError(

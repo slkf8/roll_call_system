@@ -35,7 +35,12 @@ def test_health(client: TestClient):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    body = response.json()
+    assert body["ok"] is True
+    fp = body["dataDirFingerprint"]
+    assert isinstance(fp, str)
+    assert len(fp) == 16
+    assert all(c in "0123456789abcdef" for c in fp)
 
 
 def test_list_students_initially_empty(client: TestClient):

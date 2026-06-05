@@ -54,7 +54,9 @@ def test_health_unaffected_by_static_mount(client: TestClient):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    body = response.json()
+    assert body["ok"] is True
+    assert len(body["dataDirFingerprint"]) == 16
     # Health is JSON, untouched by the entry-HTML no-store policy.
     assert "no-store" not in response.headers.get("cache-control", "")
 

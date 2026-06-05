@@ -30,6 +30,7 @@ Frontend dist resolution (highest priority first):
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -97,6 +98,20 @@ def get_data_dir() -> Path:
 def get_database_url() -> str:
     """SQLite URL for the app database, anchored at the data directory."""
     return f"sqlite:///{get_data_dir() / 'app.db'}"
+
+
+def data_dir_fingerprint(data_dir: Path | str | None = None) -> str:
+    """Short, non-reversible identity of a resolved data directory.
+
+    Shared by ``/health`` and the restore CLI's health probe so a responding
+    backend can be matched to the *same* data directory without exposing the
+    path. Returns a 16-char hex SHA-256 prefix of the resolved path. When
+    ``data_dir`` is None the active data directory is used. Symlinks and
+    ``..`` segments are normalized via ``resolve()`` so equivalent paths map to
+    the same fingerprint.
+    """
+    target = get_data_dir() if data_dir is None else Path(data_dir).expanduser()
+    return hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:16]
 
 
 def get_frontend_dist_dir() -> Path | None:

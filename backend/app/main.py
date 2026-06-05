@@ -6,7 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import _is_packaged, get_allowed_origins, get_data_dir, get_frontend_dist_dir
+from app.config import (
+    _is_packaged,
+    data_dir_fingerprint,
+    get_allowed_origins,
+    get_data_dir,
+    get_frontend_dist_dir,
+)
 from app.database import init_db
 from app.routers import exports, global_events, schedule_rules, sessions, statistics, students
 from app.services import app_lock, backup_service
@@ -73,7 +79,10 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "dataDirFingerprint": data_dir_fingerprint(get_data_dir()),
+    }
 
 
 app.include_router(students.router)

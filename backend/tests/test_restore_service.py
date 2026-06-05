@@ -5,6 +5,7 @@ copied, hashed, or modified.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
@@ -49,6 +50,27 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     backups = data / "backups"
     backups.mkdir(parents=True)
     return data, backups
+
+
+class _HealthResponse:
+    def __init__(self, payload: dict | str, *, status: int = 200):
+        self.status = status
+        if isinstance(payload, str):
+            self._body = payload.encode("utf-8")
+        else:
+            self._body = json.dumps(payload).encode("utf-8")
+
+    def getcode(self) -> int:
+        return self.status
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +270,16 @@ def test_emergency_name_unique_on_collision(tmp_path: Path):
 # restore_backup — running-app refusal
 # ---------------------------------------------------------------------------
 
+def test_data_dir_fingerprint_is_stable_for_resolved_path(tmp_path: Path):
+    data = tmp_path / "data"
+    same = tmp_path / "nested" / ".." / "data"
+    other = tmp_path / "other"
+
+    assert rs.data_dir_fingerprint(data) == rs.data_dir_fingerprint(same)
+    assert rs.data_dir_fingerprint(data) != rs.data_dir_fingerprint(other)
+    assert len(rs.data_dir_fingerprint(data)) == 16
+
+
 def test_restore_refused_when_health_running(tmp_path: Path, monkeypatch):
     data, backups = _setup(tmp_path)
     _make_valid_db(data / "app.db", "A")
@@ -259,6 +291,137 @@ def test_restore_refused_when_health_running(tmp_path: Path, monkeypatch):
 
     assert _markers(data / "app.db") == ["A"]  # untouched
     assert rs.read_history(data_dir=data) == []
+
+
+def test_restore_refused_when_health_fingerprint_matches(tmp_path: Path, monkeypatch):
+    data, backups = _setup(tmp_path)
+    _make_valid_db(data / "app.db", "A")
+    _make_valid_db(backups / "app_latest.db", "B")
+
+    def _urlopen(_url, timeout):
+        assert timeout == rs._HEALTH_TIMEOUT_SECONDS
+        return _HealthResponse(
+            {"ok": True, "dataDirFingerprint": rs.data_dir_fingerprint(data)}
+        )
+
+    monkeypatch.setattr(rs.urllib.request, "urlopen", _urlopen)
+
+    with pytest.raises(rs.RestoreError):
+        rs.restore_backup("app_latest.db", data_dir=data)
+
+    assert _markers(data / "app.db") == ["A"]
+    assert rs.read_history(data_dir=data) == []
+
+
+def test_restore_ignores_health_fingerprint_for_other_data_dir(tmp_path: Path, monkeypatch):
+    data, backups = _setup(tmp_path)
+    _make_valid_db(data / "app.db", "A")
+    _make_valid_db(backups / "app_latest.db", "B")
+    other_data = tmp_path / "other-data"
+
+    monkeypatch.setattr(
+        rs.urllib.request,
+        "urlopen",
+        lambda _url, timeout: _HealthResponse(
+            {"ok": True, "dataDirFingerprint": rs.data_dir_fingerprint(other_data)}
+        ),
+    )
+
+    result = rs.restore_backup("app_latest.db", data_dir=data)
+
+    assert result["result"] == "success"
+    assert _markers(data / "app.db") == ["B"]
+
+
+def test_restore_refused_on_legacy_health_payload_without_fingerprint(tmp_path: Path, monkeypatch):
+    # A legacy RollCall ({"ok": true}, no fingerprint) predates the lifecycle
+    # lock; its data dir cannot be confirmed, so restore is refused conservatively.
+    data, backups = _setup(tmp_path)
+    _make_valid_db(data / "app.db", "A")
+    _make_valid_db(backups / "app_latest.db", "B")
+    monkeypatch.setattr(
+        rs.urllib.request,
+        "urlopen",
+        lambda _url, timeout: _HealthResponse({"ok": True}),
+    )
+
+    assert rs._service_health_running(data) is True
+    with pytest.raises(rs.RestoreError):
+        rs.restore_backup("app_latest.db", data_dir=data)
+
+    assert _markers(data / "app.db") == ["A"]  # untouched
+    assert rs.read_history(data_dir=data) == []
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _HealthResponse({"ok": True}, status=503),     # non-200
+        _HealthResponse("not-json"),                    # unparseable body
+        _HealthResponse({"status": "healthy"}),         # 200 but not RollCall (no ok)
+        _HealthResponse({"ok": False}),                 # 200 RollCall-ish but not ok
+        RuntimeError("connection refused"),             # connection failure
+    ],
+)
+def test_service_health_probe_is_advisory_on_unidentified_response(
+    tmp_path: Path, monkeypatch, response
+):
+    data = tmp_path / "data"
+
+    def _urlopen(_url, timeout):
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(rs.urllib.request, "urlopen", _urlopen)
+
+    assert rs._service_health_running(data) is False
+
+
+@pytest.mark.parametrize(
+    "bad_fingerprint",
+    [
+        None,                       # missing / explicit null
+        123,                        # non-string
+        "",                         # empty
+        "abcd",                     # too short
+        "0123456789abcdef0",        # too long (17)
+        "zzzzzzzzzzzzzzzz",         # right length but non-hex
+        "ABCDEF0123456789",         # right length, hex, but uppercase
+    ],
+)
+def test_service_health_probe_blocks_on_malformed_fingerprint(
+    tmp_path: Path, monkeypatch, bad_fingerprint
+):
+    data = tmp_path / "data"
+    payload = {"ok": True}
+    if bad_fingerprint is not None:
+        payload["dataDirFingerprint"] = bad_fingerprint
+
+    monkeypatch.setattr(
+        rs.urllib.request,
+        "urlopen",
+        lambda _url, timeout: _HealthResponse(payload),
+    )
+
+    # ok=true but the fingerprint cannot be trusted -> conservative block.
+    assert rs._service_health_running(data) is True
+
+
+def test_service_health_probe_ignores_valid_other_fingerprint(tmp_path: Path, monkeypatch):
+    # A well-formed 16-char lowercase-hex fingerprint that is NOT ours must not
+    # block on health alone (different data dir).
+    data = tmp_path / "data"
+    other = rs.data_dir_fingerprint(tmp_path / "other-data")
+    assert other != rs.data_dir_fingerprint(data)
+
+    monkeypatch.setattr(
+        rs.urllib.request,
+        "urlopen",
+        lambda _url, timeout: _HealthResponse({"ok": True, "dataDirFingerprint": other}),
+    )
+
+    assert rs._service_health_running(data) is False
 
 
 def test_restore_refused_when_db_write_locked(tmp_path: Path, monkeypatch):
