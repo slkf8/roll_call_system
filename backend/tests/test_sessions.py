@@ -607,3 +607,295 @@ def test_patch_materials_on_present_session_is_silently_cleared(client: TestClie
     assert payload["status"] == "present"
     assert payload["materialsProvided"] is False
     assert payload["materialsReasonCode"] is None
+
+
+# --- Bulk delete ---------------------------------------------------------
+
+
+def bulk_delete(client: TestClient, dates, *, dry_run: bool = False):
+    return client.post(
+        "/api/sessions/bulk-delete",
+        json={"dates": dates, "dryRun": dry_run},
+    )
+
+
+def session_ids(client: TestClient) -> set[int]:
+    return {item["id"] for item in client.get("/api/sessions").json()}
+
+
+def test_bulk_delete_dry_run_only_previews(client: TestClient):
+    student = create_student(client)
+    create_session(client, student_id=student["id"], date_iso="2026-06-03", start="16:00")
+    create_session(client, student_id=student["id"], date_iso="2026-06-10", start="16:00")
+
+    response = bulk_delete(
+        client, ["2026-06-03", "2026-06-10"], dry_run=True
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True
+    assert body["dryRun"] is True
+    assert body["removedCount"] == 2
+    assert body["detachedMakeupCount"] == 0
+    # Nothing deleted.
+    assert len(client.get("/api/sessions").json()) == 2
+
+
+def test_bulk_delete_removes_all_sessions_in_dates(client: TestClient):
+    student = create_student(client)
+    create_session(client, student_id=student["id"], date_iso="2026-06-03", start="16:00")
+    create_session(client, student_id=student["id"], date_iso="2026-06-10", start="16:00")
+    create_session(client, student_id=student["id"], date_iso="2026-06-17", start="16:00")
+    keep = create_session(
+        client, student_id=student["id"], date_iso="2026-06-24", start="16:00"
+    )
+
+    response = bulk_delete(
+        client, ["2026-06-03", "2026-06-10", "2026-06-17"], dry_run=False
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["dryRun"] is False
+    assert body["removedCount"] == 3
+    # Unselected date survives.
+    assert session_ids(client) == {keep["id"]}
+
+
+def test_bulk_delete_handles_mixed_kind_and_status(client: TestClient):
+    student = create_student(client)
+    rule = create_schedule_rule(client, student["id"])
+    date = "2026-06-03"
+    # generatedRegular (regular + schedule_rule_id), pending
+    create_session(
+        client,
+        student_id=student["id"],
+        date_iso=date,
+        start="09:00",
+        kind="regular",
+        status="pending",
+        schedule_rule_id=rule["id"],
+    )
+    # manualRegular (regular, no rule), present
+    create_session(
+        client,
+        student_id=student["id"],
+        date_iso=date,
+        start="10:00",
+        kind="regular",
+        status="present",
+    )
+    # makeup, absent
+    create_session(
+        client,
+        student_id=student["id"],
+        date_iso=date,
+        start="11:00",
+        kind="makeup",
+        status="absent",
+    )
+    # extra, cancelled
+    create_session(
+        client,
+        student_id=student["id"],
+        date_iso=date,
+        start="12:00",
+        kind="extra",
+        status="cancelled",
+    )
+
+    response = bulk_delete(client, [date], dry_run=False)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["removedCount"] == 4
+    assert session_ids(client) == set()
+
+
+def test_bulk_delete_kind_breakdown_is_correct(client: TestClient):
+    student = create_student(client)
+    rule = create_schedule_rule(client, student["id"])
+    date = "2026-06-03"
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="09:00",
+        kind="regular", schedule_rule_id=rule["id"],
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="09:30",
+        kind="regular", schedule_rule_id=rule["id"],
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="10:00", kind="regular"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="11:00", kind="makeup"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="12:00", kind="extra"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="13:00", kind="extra"
+    )
+
+    body = bulk_delete(client, [date], dry_run=True).json()
+    breakdown = body["breakdown"]
+    assert breakdown["generatedRegular"] == 2
+    assert breakdown["manualRegular"] == 1
+    assert breakdown["makeup"] == 1
+    assert breakdown["extra"] == 2
+
+
+def test_bulk_delete_status_breakdown_is_correct(client: TestClient):
+    student = create_student(client)
+    date = "2026-06-03"
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="09:00", status="present"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="10:00", status="present"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="11:00", status="absent"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="12:00", status="pending"
+    )
+    create_session(
+        client, student_id=student["id"], date_iso=date, start="13:00", status="cancelled"
+    )
+
+    breakdown = bulk_delete(client, [date], dry_run=True).json()["breakdown"]
+    assert breakdown["present"] == 2
+    assert breakdown["absent"] == 1
+    assert breakdown["pending"] == 1
+    assert breakdown["cancelled"] == 1
+
+
+def test_bulk_delete_deduplicates_dates(client: TestClient):
+    student = create_student(client)
+    create_session(client, student_id=student["id"], date_iso="2026-06-03", start="16:00")
+
+    response = bulk_delete(
+        client, ["2026-06-03", "2026-06-03", "2026-06-03"], dry_run=True
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["removedCount"] == 1
+
+
+def test_bulk_delete_empty_dates_returns_zero(client: TestClient):
+    response = bulk_delete(client, [], dry_run=False)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True
+    assert body["removedCount"] == 0
+    assert body["detachedMakeupCount"] == 0
+    assert body["breakdown"] == {
+        "generatedRegular": 0,
+        "manualRegular": 0,
+        "makeup": 0,
+        "extra": 0,
+        "present": 0,
+        "absent": 0,
+        "pending": 0,
+        "cancelled": 0,
+    }
+
+
+def test_bulk_delete_invalid_date_returns_422(client: TestClient):
+    response = bulk_delete(client, ["06-03-2026"], dry_run=False)
+    assert response.status_code == 422
+
+    response = bulk_delete(client, ["2026-13-01"], dry_run=False)
+    assert response.status_code == 422
+
+
+def test_bulk_delete_detaches_cross_range_makeup(client: TestClient):
+    student = create_student(client)
+    source = create_session(
+        client, student_id=student["id"], date_iso="2026-06-03", start="10:00"
+    )
+    makeup = create_session(
+        client,
+        student_id=student["id"],
+        date_iso="2026-07-10",
+        start="11:00",
+        kind="makeup",
+        makeup_of_date_iso="2026-06-03",
+        makeup_of_session_id=source["id"],
+    )
+
+    # dryRun reports the would-be detach but does not mutate.
+    preview = bulk_delete(client, ["2026-06-03"], dry_run=True).json()
+    assert preview["detachedMakeupCount"] == 1
+    still_linked = client.get("/api/sessions").json()
+    linked = next(item for item in still_linked if item["id"] == makeup["id"])
+    assert linked["makeupOfSessionId"] == source["id"]
+
+    # Real run detaches the surviving makeup and removes the source.
+    response = bulk_delete(client, ["2026-06-03"], dry_run=False)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["removedCount"] == 1
+    assert body["detachedMakeupCount"] == 1
+
+    remaining = client.get("/api/sessions").json()
+    assert {item["id"] for item in remaining} == {makeup["id"]}
+    assert remaining[0]["makeupOfSessionId"] is None
+
+
+def test_bulk_delete_internal_references_need_no_detach(client: TestClient):
+    student = create_student(client)
+    source = create_session(
+        client, student_id=student["id"], date_iso="2026-06-03", start="10:00"
+    )
+    create_session(
+        client,
+        student_id=student["id"],
+        date_iso="2026-06-04",
+        start="11:00",
+        kind="makeup",
+        makeup_of_date_iso="2026-06-03",
+        makeup_of_session_id=source["id"],
+    )
+
+    response = bulk_delete(client, ["2026-06-03", "2026-06-04"], dry_run=False)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["removedCount"] == 2
+    # The referencing makeup is itself deleted, so nothing needs detaching.
+    assert body["detachedMakeupCount"] == 0
+    assert session_ids(client) == set()
+
+
+def test_bulk_delete_rolls_back_on_failure(client: TestClient, monkeypatch):
+    student = create_student(client)
+    source = create_session(
+        client, student_id=student["id"], date_iso="2026-06-03", start="10:00"
+    )
+    makeup = create_session(
+        client,
+        student_id=student["id"],
+        date_iso="2026-07-10",
+        start="11:00",
+        kind="makeup",
+        makeup_of_date_iso="2026-06-03",
+        makeup_of_session_id=source["id"],
+    )
+
+    def boom(_db):
+        raise RuntimeError("simulated commit failure")
+
+    monkeypatch.setattr("app.routers.sessions._bulk_delete_commit", boom)
+
+    response = bulk_delete(client, ["2026-06-03"], dry_run=False)
+    assert response.status_code == 500
+
+    # Nothing deleted and no detach persisted: full rollback.
+    remaining = client.get("/api/sessions").json()
+    assert {item["id"] for item in remaining} == {source["id"], makeup["id"]}
+    linked = next(item for item in remaining if item["id"] == makeup["id"])
+    assert linked["makeupOfSessionId"] == source["id"]

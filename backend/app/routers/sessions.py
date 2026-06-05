@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AttendanceSession, Student, StudentScheduleRule, utc_now
 from app.schemas import (
+    SessionBulkDeleteBreakdown,
+    SessionBulkDeleteRequest,
+    SessionBulkDeleteResponse,
     SessionCreate,
     SessionRead,
     SessionStudentSnapshot,
@@ -139,6 +142,110 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(record)
     return to_session_read(record, db)
+
+
+def _bulk_delete_commit(db: Session) -> None:
+    """Single commit point for the destructive bulk-delete transaction.
+
+    Isolated so tests can simulate a mid-transaction failure (raise here) and
+    assert the router rolls back without any partial deletion.
+    """
+    db.commit()
+
+
+@router.post("/bulk-delete", response_model=SessionBulkDeleteResponse)
+def bulk_delete_sessions(
+    payload: SessionBulkDeleteRequest, db: Session = Depends(get_db)
+):
+    # Dedup the requested dates; order does not matter for the IN filter.
+    unique_dates = sorted(set(payload.dates))
+
+    counts = {
+        "generatedRegular": 0,
+        "manualRegular": 0,
+        "makeup": 0,
+        "extra": 0,
+        "present": 0,
+        "absent": 0,
+        "pending": 0,
+        "cancelled": 0,
+    }
+
+    if not unique_dates:
+        return SessionBulkDeleteResponse(
+            ok=True,
+            dryRun=payload.dryRun,
+            removedCount=0,
+            detachedMakeupCount=0,
+            breakdown=SessionBulkDeleteBreakdown(**counts),
+        )
+
+    target_sessions = (
+        db.query(AttendanceSession)
+        .filter(AttendanceSession.date_iso.in_(unique_dates))
+        .all()
+    )
+
+    for record in target_sessions:
+        if record.kind == "regular":
+            if record.schedule_rule_id is not None:
+                counts["generatedRegular"] += 1
+            else:
+                counts["manualRegular"] += 1
+        elif record.kind == "makeup":
+            counts["makeup"] += 1
+        elif record.kind == "extra":
+            counts["extra"] += 1
+
+        if record.status in counts:
+            counts[record.status] += 1
+
+    removed_count = len(target_sessions)
+    target_ids = [record.id for record in target_sessions]
+
+    # Sessions that survive the delete but reference one of the doomed sessions
+    # via makeup_of_session_id must be detached — SQLite FK enforcement is off,
+    # so we mirror the manual detach the single-delete route performs. Sessions
+    # inside the deletion set are removed outright and need no detaching.
+    detach_query = db.query(AttendanceSession).filter(
+        AttendanceSession.makeup_of_session_id.in_(target_ids),
+        AttendanceSession.id.notin_(target_ids),
+    )
+    detached_count = detach_query.count()
+
+    if payload.dryRun:
+        # Authoritative preview only: never mutate, never commit.
+        return SessionBulkDeleteResponse(
+            ok=True,
+            dryRun=True,
+            removedCount=removed_count,
+            detachedMakeupCount=detached_count,
+            breakdown=SessionBulkDeleteBreakdown(**counts),
+        )
+
+    try:
+        if detached_count:
+            detach_query.update(
+                {AttendanceSession.makeup_of_session_id: None},
+                synchronize_session=False,
+            )
+        if target_ids:
+            db.query(AttendanceSession).filter(
+                AttendanceSession.id.in_(target_ids)
+            ).delete(synchronize_session=False)
+        _bulk_delete_commit(db)
+    except Exception:
+        # Any failure: roll the whole batch back. No partial deletion.
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Bulk delete failed")
+
+    return SessionBulkDeleteResponse(
+        ok=True,
+        dryRun=False,
+        removedCount=removed_count,
+        detachedMakeupCount=detached_count,
+        breakdown=SessionBulkDeleteBreakdown(**counts),
+    )
 
 
 @router.patch("/{session_id}", response_model=SessionRead)

@@ -279,6 +279,37 @@ class SessionRead(BaseModel):
     updatedAt: str = Field(description="ISO datetime")
 
 
+class SessionBulkDeleteRequest(BaseModel):
+    dates: list[str] = Field(default_factory=list)
+    dryRun: bool = False
+
+    @field_validator("dates")
+    @classmethod
+    def validate_dates(cls, value: list[str]) -> list[str]:
+        for item in value:
+            _validate_required_date(item)
+        return value
+
+
+class SessionBulkDeleteBreakdown(BaseModel):
+    generatedRegular: int
+    manualRegular: int
+    makeup: int
+    extra: int
+    present: int
+    absent: int
+    pending: int
+    cancelled: int
+
+
+class SessionBulkDeleteResponse(BaseModel):
+    ok: bool
+    dryRun: bool
+    removedCount: int
+    detachedMakeupCount: int
+    breakdown: SessionBulkDeleteBreakdown
+
+
 class GlobalEventBase(BaseModel):
     dateISO: str
     mode: GlobalEventMode
