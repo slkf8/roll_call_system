@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  bulkDeleteSessions,
   createSession,
   deleteSession,
   fetchSessions,
@@ -365,5 +366,278 @@ describe("sessionsApi", () => {
         scheduleRuleId: 456,
       }),
     ]);
+  });
+});
+
+
+function bulkDeleteResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    dryRun: true,
+    removedCount: 12,
+    detachedMakeupCount: 2,
+    breakdown: {
+      generatedRegular: 5,
+      manualRegular: 2,
+      makeup: 3,
+      extra: 2,
+      present: 4,
+      absent: 2,
+      pending: 5,
+      cancelled: 1,
+    },
+    ...overrides,
+  };
+}
+
+
+describe("bulkDeleteSessions", () => {
+  it("posts a dryRun preview and parses the breakdown", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => bulkDeleteResponse(),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      bulkDeleteSessions(["2026-06-03", "2026-06-10"], true)
+    ).resolves.toEqual({
+      ok: true,
+      dryRun: true,
+      removedCount: 12,
+      detachedMakeupCount: 2,
+      breakdown: {
+        generatedRegular: 5,
+        manualRegular: 2,
+        makeup: 3,
+        extra: 2,
+        present: 4,
+        absent: 2,
+        pending: 5,
+        cancelled: 1,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/bulk-delete",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dates: ["2026-06-03", "2026-06-10"], dryRun: true }),
+      })
+    );
+  });
+
+  it("posts a real delete with dryRun=false and parses counts", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () =>
+        bulkDeleteResponse({ dryRun: false, removedCount: 3, detachedMakeupCount: 1 }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await bulkDeleteSessions(["2026-06-03"], false);
+    expect(result.dryRun).toBe(false);
+    expect(result.removedCount).toBe(3);
+    expect(result.detachedMakeupCount).toBe(1);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/bulk-delete",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ dates: ["2026-06-03"], dryRun: false }),
+      })
+    );
+  });
+
+  it("sends an empty dates array as []", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () =>
+        bulkDeleteResponse({ removedCount: 0, detachedMakeupCount: 0 }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await bulkDeleteSessions([], true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/sessions/bulk-delete",
+      expect.objectContaining({
+        body: JSON.stringify({ dates: [], dryRun: true }),
+      })
+    );
+  });
+
+  it("throws on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      }))
+    );
+
+    await expect(bulkDeleteSessions(["2026-06-03"], false)).rejects.toThrow(
+      "Failed to bulk delete sessions"
+    );
+  });
+
+  it("throws when ok !== true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ ok: false }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("throws when dryRun is not a boolean", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ dryRun: "yes" }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("throws when removedCount / detachedMakeupCount are not numbers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ removedCount: "12" }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ detachedMakeupCount: null }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("throws when breakdown is missing", async () => {
+    const { breakdown: _omit, ...withoutBreakdown } = bulkDeleteResponse();
+    void _omit;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => withoutBreakdown,
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("throws when a breakdown field is missing", async () => {
+    const response = bulkDeleteResponse();
+    delete (response.breakdown as Record<string, unknown>).extra;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => response,
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("throws when a breakdown field is not a number", async () => {
+    const response = bulkDeleteResponse();
+    (response.breakdown as Record<string, unknown>).makeup = "3";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => response,
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+  });
+
+  it("rejects top-level counts that are negative, fractional, NaN, or Infinity", async () => {
+    const bad = [
+      bulkDeleteResponse({ removedCount: -1 }),
+      bulkDeleteResponse({ detachedMakeupCount: 1.5 }),
+      bulkDeleteResponse({ removedCount: NaN }),
+      bulkDeleteResponse({ detachedMakeupCount: Infinity }),
+    ];
+    for (const response of bad) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: true, json: async () => response }))
+      );
+      await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+        "Invalid bulk delete session response"
+      );
+    }
+  });
+
+  it("rejects breakdown counts that are negative, fractional, NaN, or Infinity", async () => {
+    const variants: Array<Record<string, unknown>> = [
+      { generatedRegular: -1 },
+      { makeup: 2.5 },
+      { present: NaN },
+      { cancelled: Infinity },
+    ];
+    for (const patch of variants) {
+      const response = bulkDeleteResponse();
+      Object.assign(response.breakdown as Record<string, unknown>, patch);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: true, json: async () => response }))
+      );
+      await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+        "Invalid bulk delete session response"
+      );
+    }
+  });
+
+  it("rejects when response.dryRun does not echo the request dryRun", async () => {
+    // request dryRun=true, response dryRun=false
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ dryRun: false }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], true)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
+
+    // request dryRun=false, response dryRun=true
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => bulkDeleteResponse({ dryRun: true }),
+      }))
+    );
+    await expect(bulkDeleteSessions([], false)).rejects.toThrow(
+      "Invalid bulk delete session response"
+    );
   });
 });

@@ -51,6 +51,30 @@ export type DeleteSessionResult = {
   detachedMakeupCount: number;
 };
 
+export type SessionBulkDeleteBreakdown = {
+  generatedRegular: number;
+  manualRegular: number;
+  makeup: number;
+  extra: number;
+  present: number;
+  absent: number;
+  pending: number;
+  cancelled: number;
+};
+
+export type BulkDeleteSessionsResult = {
+  ok: true;
+  dryRun: boolean;
+  removedCount: number;
+  detachedMakeupCount: number;
+  breakdown: SessionBulkDeleteBreakdown;
+};
+
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -279,5 +303,79 @@ export async function deleteSession(id: number): Promise<DeleteSessionResult> {
   return {
     ok: true,
     detachedMakeupCount: data.detachedMakeupCount,
+  };
+}
+
+
+const BULK_DELETE_BREAKDOWN_KEYS = [
+  "generatedRegular",
+  "manualRegular",
+  "makeup",
+  "extra",
+  "present",
+  "absent",
+  "pending",
+  "cancelled",
+] as const;
+
+
+function parseBulkDeleteBreakdown(value: unknown): SessionBulkDeleteBreakdown {
+  if (!isRecord(value)) {
+    throw new Error("Invalid bulk delete session response");
+  }
+  for (const key of BULK_DELETE_BREAKDOWN_KEYS) {
+    if (!isNonNegativeInteger(value[key])) {
+      throw new Error("Invalid bulk delete session response");
+    }
+  }
+  return {
+    generatedRegular: value.generatedRegular as number,
+    manualRegular: value.manualRegular as number,
+    makeup: value.makeup as number,
+    extra: value.extra as number,
+    present: value.present as number,
+    absent: value.absent as number,
+    pending: value.pending as number,
+    cancelled: value.cancelled as number,
+  };
+}
+
+
+export async function bulkDeleteSessions(
+  dates: string[],
+  dryRun: boolean
+): Promise<BulkDeleteSessionsResult> {
+  const response = await fetch(`${API_BASE_URL}/api/sessions/bulk-delete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ dates, dryRun }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to bulk delete sessions: ${response.status}`);
+  }
+
+  const data: unknown = await response.json();
+  if (
+    !isRecord(data) ||
+    data.ok !== true ||
+    typeof data.dryRun !== "boolean" ||
+    data.dryRun !== dryRun ||
+    !isNonNegativeInteger(data.removedCount) ||
+    !isNonNegativeInteger(data.detachedMakeupCount)
+  ) {
+    throw new Error("Invalid bulk delete session response");
+  }
+
+  const breakdown = parseBulkDeleteBreakdown(data.breakdown);
+
+  return {
+    ok: true,
+    dryRun: data.dryRun,
+    removedCount: data.removedCount,
+    detachedMakeupCount: data.detachedMakeupCount,
+    breakdown,
   };
 }
