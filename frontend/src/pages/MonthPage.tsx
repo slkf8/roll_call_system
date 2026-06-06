@@ -6,8 +6,17 @@ import {
   updateGlobalEvent,
 } from "../api/globalEventsApi";
 import type { GlobalEventCreatePayload } from "../api/globalEventsApi";
-import { createSession, deleteSession, updateSession } from "../api/sessionsApi";
-import type { SessionUpdatePayload } from "../api/sessionsApi";
+import {
+  bulkDeleteSessions,
+  createSession,
+  deleteSession,
+  updateSession,
+} from "../api/sessionsApi";
+import type {
+  BulkDeleteSessionsResult,
+  SessionUpdatePayload,
+} from "../api/sessionsApi";
+import { applyBulkRemovalToSessions } from "../shared/bulkRemove";
 
 // ==========================================
 // 匯入 Shared 層內容 (對齊現有專案結構)
@@ -63,6 +72,8 @@ import { readSchoolYearOverride } from "../shared/schoolYearStorage";
 // ==========================================
 // 本地 Types
 // ==========================================
+type BatchMode = "event" | "remove" | null;
+
 export interface MakeupDraft {
   dateISO: string;
   start: string;
@@ -214,7 +225,9 @@ export default function MonthPage({
     viewDate.getFullYear() === today.getFullYear() &&
     viewDate.getMonth() === today.getMonth();
 
-  const [isBatchMode, setIsBatchMode] = useState(false);
+  // "event" = 停課 / 假期批量；"remove" = 批量移除日期內課次；null = 正常頁面。
+  const [batchMode, setBatchMode] = useState<BatchMode>(null);
+  const isBatchMode = batchMode !== null;
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
 
   // Forms & Action Sheets State
@@ -240,6 +253,29 @@ export default function MonthPage({
   const [batchChipYear, setBatchChipYear] = useState<number>(
     () => new Date().getFullYear()
   );
+
+  // --- 批量移除日期內課次（remove mode）狀態 ---
+  const [removeRangeSheetOpen, setRemoveRangeSheetOpen] = useState(false);
+  const [removeRangeFrom, setRemoveRangeFrom] = useState("");
+  const [removeRangeTo, setRemoveRangeTo] = useState("");
+  const [removeRangeError, setRemoveRangeError] = useState("");
+  const [bulkRemovePreviewOpen, setBulkRemovePreviewOpen] = useState(false);
+  const [bulkRemovePreviewLoading, setBulkRemovePreviewLoading] = useState(false);
+  const [bulkRemovePreview, setBulkRemovePreview] =
+    useState<BulkDeleteSessionsResult | null>(null);
+  const [bulkRemovePreviewDates, setBulkRemovePreviewDates] = useState<string[]>([]);
+  const [bulkRemoveConfirmOpen, setBulkRemoveConfirmOpen] = useState(false);
+  const [bulkRemoveRunning, setBulkRemoveRunning] = useState(false);
+  // Synchronous re-entry locks for destructive bulk-remove flow. Loading state
+  // drives UI disabled / "處理中…"; these refs prevent a second request from
+  // being fired before React re-renders the disabled button.
+  const bulkRemovePreviewLockRef = useRef(false);
+  const bulkRemoveCommitLockRef = useRef(false);
+  // Context version (monotonic) — async handlers snapshot it at request start
+  // and discard their UI writes if the user has since exited / changed selection
+  // / re-entered remove mode. Only marks callbacks stale; does NOT cancel the
+  // in-flight backend request and does NOT touch the H1 locks.
+  const bulkRemoveContextVersionRef = useRef(0);
 
   // 安全陣列確保不會因為 undefined crash
   const safeSessions = sessions || [];
@@ -785,8 +821,182 @@ const handleDeleteSubmit = async () => {
     setDrawerGlobalSheetOpen(false);
     setActiveMenuId(null);
     setSelectedDates(new Set([drawerDate]));
-    setIsBatchMode(true);
+    setBatchMode("event");
     setDrawerDate(null);
+  }
+
+  // Leave any batch mode (event or remove) and reset all remove-mode UI/state.
+  function invalidateBulkRemoveContext() {
+    bulkRemoveContextVersionRef.current += 1;
+  }
+
+  function exitBatchMode() {
+    // Commit pending: refuse exit so users cannot mistake destructive deletion
+    // for something still cancellable. The async commit's finally will release
+    // the lock; the user can retry exit afterwards.
+    if (bulkRemoveCommitLockRef.current) return;
+    invalidateBulkRemoveContext();
+    setBatchMode(null);
+    setSelectedDates(new Set());
+    setRemoveRangeSheetOpen(false);
+    setRemoveRangeFrom("");
+    setRemoveRangeTo("");
+    setRemoveRangeError("");
+    setBulkRemovePreviewOpen(false);
+    // Preview request still in flight: keep loading=true so re-entering remove
+    // mode does not show an enabled preview button whose handler would silently
+    // return on the H1 lock. The pending request's finally resets loading.
+    if (!bulkRemovePreviewLockRef.current) {
+      setBulkRemovePreviewLoading(false);
+    }
+    setBulkRemovePreview(null);
+    setBulkRemovePreviewDates([]);
+    setBulkRemoveConfirmOpen(false);
+    setBulkRemoveRunning(false);
+  }
+
+  function openRemoveRangeSheet() {
+    // Destructive intent: never pre-fill a whole month by default.
+    setRemoveRangeFrom("");
+    setRemoveRangeTo("");
+    setRemoveRangeError("");
+    setRemoveRangeSheetOpen(true);
+  }
+
+  function closeRemoveRangeSheet() {
+    setRemoveRangeSheetOpen(false);
+    setRemoveRangeError("");
+  }
+
+  function applyRemoveRange() {
+    if (!removeRangeFrom || !removeRangeTo) {
+      setRemoveRangeError("請選擇開始與結束日期");
+      return;
+    }
+    if (removeRangeFrom > removeRangeTo) {
+      setRemoveRangeError("結束日期需晚於或等於開始日期");
+      return;
+    }
+    const monthAnchor = formatDateISO(viewDate);
+    const monthStart = getMonthStartISO(monthAnchor);
+    const monthEnd = getMonthEndISO(monthAnchor);
+    if (
+      removeRangeFrom < monthStart ||
+      removeRangeFrom > monthEnd ||
+      removeRangeTo < monthStart ||
+      removeRangeTo > monthEnd
+    ) {
+      setRemoveRangeError("只能選擇本月日期");
+      return;
+    }
+    invalidateBulkRemoveContext();
+    const expanded = getDatesInRange(removeRangeFrom, removeRangeTo);
+    setSelectedDates((prev) => {
+      const next = new Set(prev);
+      for (const d of expanded) next.add(d.dateISO);
+      return next;
+    });
+    closeRemoveRangeSheet();
+  }
+
+  async function runBulkRemovePreview() {
+    if (!isSessionsBackendAvailable) {
+      setToast("資料庫未連線，暫時無法批量移除課次");
+      return;
+    }
+    const dates = Array.from(selectedDates).sort();
+    if (dates.length === 0) return;
+    // Synchronous re-entry guard: blocks a rapid second click before the
+    // disabled-state UI re-render takes effect.
+    if (bulkRemovePreviewLockRef.current) return;
+    bulkRemovePreviewLockRef.current = true;
+    // Snapshot the context version: any later invalidation (exit / re-enter /
+    // selection change / preview close) must invalidate this callback's writes.
+    const contextVersion = bulkRemoveContextVersionRef.current;
+    setBulkRemovePreviewLoading(true);
+    try {
+      const result = await bulkDeleteSessions(dates, true);
+      if (contextVersion !== bulkRemoveContextVersionRef.current) return;
+      setBulkRemovePreview(result);
+      setBulkRemovePreviewDates(dates);
+      setBulkRemovePreviewOpen(true);
+    } catch (error) {
+      if (contextVersion !== bulkRemoveContextVersionRef.current) return;
+      console.warn("Bulk remove dry-run failed", error);
+      setToast("無法取得移除預覽，請稍後再試");
+    } finally {
+      setBulkRemovePreviewLoading(false);
+      bulkRemovePreviewLockRef.current = false;
+    }
+  }
+
+  function closeBulkRemovePreview() {
+    invalidateBulkRemoveContext();
+    setBulkRemovePreviewOpen(false);
+    setBulkRemovePreview(null);
+    setBulkRemovePreviewDates([]);
+  }
+
+  function openBulkRemoveConfirm() {
+    // Bridge: keep preview snapshot but swap to the destructive sheet.
+    setBulkRemovePreviewOpen(false);
+    setBulkRemoveConfirmOpen(true);
+  }
+
+  function closeBulkRemoveConfirm() {
+    // Commit pending: refuse close — the destructive request is already in
+    // flight and the confirm Sheet must continue to signal that to the user.
+    // Both the left「取消」button and the overlay route through here.
+    if (bulkRemoveCommitLockRef.current) return;
+    // Cancel confirm only: preview snapshot / selection / mode all intact so
+    // the user can re-preview or step back to adjust dates.
+    setBulkRemoveConfirmOpen(false);
+  }
+
+  async function runBulkRemoveCommit() {
+    if (!isSessionsBackendAvailable) {
+      setToast("資料庫未連線，暫時無法批量移除課次");
+      return;
+    }
+    const dates = bulkRemovePreviewDates;
+    if (dates.length === 0) return;
+    // Synchronous re-entry guard for the destructive commit: ensures at most
+    // one dryRun=false request even if the button is double-clicked before the
+    // disabled state takes effect.
+    if (bulkRemoveCommitLockRef.current) return;
+    bulkRemoveCommitLockRef.current = true;
+    // Commit-pending exit is blocked elsewhere, so at request-send time the
+    // context version is still the active one. We still snapshot it so the UI
+    // cleanup path can detect later invalidations (e.g. if a future change
+    // ever lets the user move on while a commit is in flight).
+    const contextVersion = bulkRemoveContextVersionRef.current;
+    setBulkRemoveRunning(true);
+    try {
+      const result = await bulkDeleteSessions(dates, false);
+      // Data sync MUST run regardless of context — backend has already
+      // deleted these sessions; the frontend mirror must converge.
+      setSessions((prev) => applyBulkRemovalToSessions(prev, dates));
+      if (contextVersion === bulkRemoveContextVersionRef.current) {
+        setBulkRemovePreviewOpen(false);
+        setBulkRemoveConfirmOpen(false);
+        setBulkRemovePreview(null);
+        setBulkRemovePreviewDates([]);
+        setSelectedDates(new Set());
+        setBatchMode(null);
+        setToast(`已移除 ${result.removedCount} 節課次`);
+      }
+    } catch (error) {
+      if (contextVersion !== bulkRemoveContextVersionRef.current) return;
+      console.warn("Bulk remove commit failed", error);
+      // Failure path: do NOT mutate sessions, do NOT clear selectedDates, do
+      // NOT leave remove mode. Close the confirm sheet so the user can revisit
+      // the preview or try again.
+      setBulkRemoveConfirmOpen(false);
+      setToast("移除失敗，資料未變更");
+    } finally {
+      setBulkRemoveRunning(false);
+      bulkRemoveCommitLockRef.current = false;
+    }
   }
 
 
@@ -859,7 +1069,7 @@ const handleBatchMarkHoliday = async () => {
     if (createdCount === 0 && updatedCount === 0) {
       setToast(`所選日期已經是${batchEventLabel}，未做變更`);
       setBatchEventSheetOpen(false);
-      setIsBatchMode(false);
+      setBatchMode(null);
       setSelectedDates(new Set());
       setBatchLeaveReason("");
       return;
@@ -941,7 +1151,7 @@ const handleBatchMarkHoliday = async () => {
   }
 
   setBatchEventSheetOpen(false);
-  setIsBatchMode(false);
+  setBatchMode(null);
   setSelectedDates(new Set());
   setBatchLeaveReason("");
 };
@@ -980,7 +1190,7 @@ const handleBatchClearHoliday = async () => {
     setToast(`已清除 ${clearedCount} 筆事件`);
   }
 
-  setIsBatchMode(false);
+  setBatchMode(null);
   setSelectedDates(new Set());
 };
 
@@ -1155,6 +1365,11 @@ const handleBatchClearHoliday = async () => {
 
   const handleDayClick = (dateISO: string) => {
     if (isBatchMode) {
+      if (batchMode === "remove") {
+        // Any change to remove-mode selection invalidates pending preview
+        // callbacks — they must not write back into a different selection.
+        invalidateBulkRemoveContext();
+      }
       setSelectedDates((prev) => {
         const next = new Set(prev);
         if (next.has(dateISO)) next.delete(dateISO);
@@ -1288,10 +1503,7 @@ const handleBatchClearHoliday = async () => {
                   已選取 {selectedDates.size} 天
                 </span>
                 <button
-                  onClick={() => {
-                    setIsBatchMode(false);
-                    setSelectedDates(new Set());
-                  }}
+                  onClick={exitBatchMode}
                   className={`rounded-full p-1.5 transition-colors ${
                     isDark
                       ? "bg-[#2C2C2E] text-slate-300 hover:bg-[#3A3A3C]"
@@ -1391,10 +1603,23 @@ const handleBatchClearHoliday = async () => {
                       },
                     },
                     {
+                      label: "批量移除日期內課次",
+                      onClick: () => {
+                        setBatchMenuOpen(false);
+                        if (!isSessionsBackendAvailable) {
+                          setToast("資料庫未連線，暫時無法批量移除課次");
+                          return;
+                        }
+                        invalidateBulkRemoveContext();
+                        setSelectedDates(new Set());
+                        setBatchMode("remove");
+                      },
+                    },
+                    {
                       label: "批量停課",
                       onClick: () => {
                         setBatchMenuOpen(false);
-                        setIsBatchMode(true);
+                        setBatchMode("event");
                       },
                     },
                   ]}
@@ -1584,30 +1809,56 @@ const handleBatchClearHoliday = async () => {
               已選 <span className={`text-[16px] ${isDark ? 'text-[#0A84FF]' : 'text-[#007AFF]'}`}>{selectedDates.size}</span>
             </div>
             <div className={`h-6 w-[1px] ${isDark ? "bg-white/10" : "bg-[#E5E5EA]"}`}></div>
-            <div className="flex gap-2">
-              <button
-                disabled={selectedDates.size === 0}
-                onClick={() => setBatchEventSheetOpen(true)}
-                className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors disabled:opacity-40 ${
-                  isDark
-                    ? "bg-[#2C2C2E] text-white ring-1 ring-white/10 active:bg-[#3A3A3C]"
-                    : "bg-gray-900 text-white active:bg-gray-800"
-                }`}
-              >
-                標記停課 / 假期
-              </button>
-              <button
-                disabled={selectedDates.size === 0}
-                onClick={handleBatchClearHoliday}
-                className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors disabled:opacity-40 ${
-                  isDark
-                    ? "bg-[#2C2C2E] text-slate-300 ring-1 ring-white/10 active:bg-[#3A3A3C]"
-                    : "bg-[#F2F2F7] text-gray-700 active:bg-[#E5E5EA]"
-                }`}
-              >
-                清除事件
-              </button>
-            </div>
+            {batchMode === "remove" ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={openRemoveRangeSheet}
+                  className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors ${
+                    isDark
+                      ? "bg-[#2C2C2E] text-slate-300 ring-1 ring-white/10 active:bg-[#3A3A3C]"
+                      : "bg-[#F2F2F7] text-gray-700 active:bg-[#E5E5EA]"
+                  }`}
+                >
+                  套用日期範圍
+                </button>
+                <button
+                  disabled={selectedDates.size === 0 || bulkRemovePreviewLoading}
+                  onClick={runBulkRemovePreview}
+                  className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors disabled:opacity-40 ${
+                    isDark
+                      ? "bg-[#2C2C2E] text-white ring-1 ring-white/10 active:bg-[#3A3A3C]"
+                      : "bg-gray-900 text-white active:bg-gray-800"
+                  }`}
+                >
+                  {bulkRemovePreviewLoading ? "處理中…" : "預覽移除課次"}
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  disabled={selectedDates.size === 0}
+                  onClick={() => setBatchEventSheetOpen(true)}
+                  className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors disabled:opacity-40 ${
+                    isDark
+                      ? "bg-[#2C2C2E] text-white ring-1 ring-white/10 active:bg-[#3A3A3C]"
+                      : "bg-gray-900 text-white active:bg-gray-800"
+                  }`}
+                >
+                  標記停課 / 假期
+                </button>
+                <button
+                  disabled={selectedDates.size === 0}
+                  onClick={handleBatchClearHoliday}
+                  className={`rounded-full px-5 py-2.5 text-[14px] font-bold transition-colors disabled:opacity-40 ${
+                    isDark
+                      ? "bg-[#2C2C2E] text-slate-300 ring-1 ring-white/10 active:bg-[#3A3A3C]"
+                      : "bg-[#F2F2F7] text-gray-700 active:bg-[#E5E5EA]"
+                  }`}
+                >
+                  清除事件
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2202,6 +2453,147 @@ const handleBatchClearHoliday = async () => {
             </div>
           </div>
         </div>
+      </IOSSheet>
+
+      {/* --- 批量移除：日期範圍 Sheet --- */}
+      <IOSSheet
+        open={removeRangeSheetOpen}
+        title="套用日期範圍"
+        subtitle="範圍將合併至已選取日期，限本月內。"
+        onClose={closeRemoveRangeSheet}
+        leftAction={{ label: "取消", onClick: closeRemoveRangeSheet }}
+        rightAction={{
+          label: "套用",
+          emphasize: true,
+          onClick: applyRemoveRange,
+        }}
+      >
+        <div className="space-y-4">
+          <div className={cardClass}>
+            <div className="space-y-4 p-4">
+              <FieldRow label="開始日期">
+                <div className="w-full text-left">
+                  <input
+                    type="date"
+                    value={removeRangeFrom}
+                    onChange={(e) => {
+                      setRemoveRangeFrom(e.target.value);
+                      if (removeRangeError) setRemoveRangeError("");
+                    }}
+                    className={inputClass}
+                  />
+                </div>
+              </FieldRow>
+              <FieldRow label="結束日期">
+                <div className="w-full text-left">
+                  <input
+                    type="date"
+                    value={removeRangeTo}
+                    onChange={(e) => {
+                      setRemoveRangeTo(e.target.value);
+                      if (removeRangeError) setRemoveRangeError("");
+                    }}
+                    className={inputClass}
+                  />
+                </div>
+              </FieldRow>
+              {removeRangeError ? (
+                <div className="text-xs text-red-500">{removeRangeError}</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </IOSSheet>
+
+      {/* --- 批量移除：權威預覽 Sheet --- */}
+      <IOSSheet
+        open={bulkRemovePreviewOpen}
+        title="批量移除課次"
+        onClose={closeBulkRemovePreview}
+        leftAction={{ label: "返回調整", onClick: closeBulkRemovePreview }}
+        rightAction={
+          bulkRemovePreview && bulkRemovePreview.removedCount > 0
+            ? {
+                label: "繼續",
+                emphasize: true,
+                onClick: openBulkRemoveConfirm,
+              }
+            : undefined
+        }
+      >
+        {bulkRemovePreview ? (
+          bulkRemovePreview.removedCount === 0 ? (
+            <div className={cardClass}>
+              <div className="p-4 text-[14px] text-[#8E8E93]">
+                所選日期內沒有課次
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className={cardClass}>
+                <div className="space-y-2 p-4 text-[14px]">
+                  <div>
+                    已選擇 {bulkRemovePreviewDates.length} 日
+                  </div>
+                  <div>
+                    共包含 {bulkRemovePreview.removedCount} 節課次
+                  </div>
+                </div>
+              </div>
+              <div className={cardClass}>
+                <div className="grid grid-cols-2 gap-2 p-4 text-[13px] leading-6">
+                  <div>固定生成課次：{bulkRemovePreview.breakdown.generatedRegular} 節</div>
+                  <div>手動新增課次：{bulkRemovePreview.breakdown.manualRegular} 節</div>
+                  <div>補課：{bulkRemovePreview.breakdown.makeup} 節</div>
+                  <div>加課：{bulkRemovePreview.breakdown.extra} 節</div>
+                </div>
+              </div>
+              <div className={cardClass}>
+                <div className="grid grid-cols-2 gap-2 p-4 text-[13px] leading-6">
+                  <div>已出席：{bulkRemovePreview.breakdown.present} 節</div>
+                  <div>缺席：{bulkRemovePreview.breakdown.absent} 節</div>
+                  <div>尚未點名：{bulkRemovePreview.breakdown.pending} 節</div>
+                  <div>已取消：{bulkRemovePreview.breakdown.cancelled} 節</div>
+                </div>
+              </div>
+            </div>
+          )
+        ) : null}
+      </IOSSheet>
+
+      {/* --- 批量移除：紅色危險確認 Sheet --- */}
+      <IOSSheet
+        open={bulkRemoveConfirmOpen}
+        title="確認移除課次？"
+        onClose={closeBulkRemoveConfirm}
+        leftAction={{ label: "取消", onClick: closeBulkRemoveConfirm }}
+        rightAction={
+          bulkRemovePreview
+            ? {
+                label: bulkRemoveRunning
+                  ? "處理中…"
+                  : `確認移除 ${bulkRemovePreview.removedCount} 節`,
+                danger: true,
+                onClick: () => {
+                  if (bulkRemoveRunning) return;
+                  void runBulkRemoveCommit();
+                },
+              }
+            : undefined
+        }
+      >
+        {bulkRemovePreview ? (
+          <div className={cardClass}>
+            <div className="space-y-3 p-4 text-[14px] leading-6">
+              <div>
+                即將移除所選日期內的 {bulkRemovePreview.removedCount} 節課次，包括已點名課次。
+              </div>
+              <div className="text-red-500">
+                此操作無法在頁面內直接復原。
+              </div>
+            </div>
+          </div>
+        ) : null}
       </IOSSheet>
 
       <IOSSheet
