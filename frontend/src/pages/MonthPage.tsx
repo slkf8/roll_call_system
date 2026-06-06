@@ -8,6 +8,7 @@ import {
 import type { GlobalEventCreatePayload } from "../api/globalEventsApi";
 import {
   bulkDeleteSessions,
+  checkSessionsBackendHealth,
   createSession,
   deleteSession,
   updateSession,
@@ -271,6 +272,10 @@ export default function MonthPage({
   // being fired before React re-renders the disabled button.
   const bulkRemovePreviewLockRef = useRef(false);
   const bulkRemoveCommitLockRef = useRef(false);
+  // Synchronous re-entry lock for the entry health probe only — blocks a second
+  // request / double mode-entry while the GET /health probe is in flight. Kept
+  // separate from the preview / commit locks above.
+  const bulkRemoveEntryProbeLockRef = useRef(false);
   // Context version (monotonic) — async handlers snapshot it at request start
   // and discard their UI writes if the user has since exited / changed selection
   // / re-entered remove mode. Only marks callbacks stale; does NOT cancel the
@@ -855,6 +860,32 @@ const handleDeleteSubmit = async () => {
     setBulkRemoveRunning(false);
   }
 
+  // Entry into remove mode is gated by a fresh GET /health probe rather than the
+  // mount-time isSessionsBackendAvailable snapshot, which can be stale in both
+  // directions: a backend that went offline after load would otherwise let the
+  // destructive flow open, and a backend that recovered would otherwise stay
+  // blocked until a full page reload. The probe is authoritative for "reachable
+  // right now"; destructive preview/commit still fail closed on their own calls.
+  async function enterBulkRemoveMode() {
+    setBatchMenuOpen(false);
+
+    // Synchronous re-entry guard: blocks a second probe / duplicate mode-entry
+    // while the health request is still pending.
+    if (bulkRemoveEntryProbeLockRef.current) return;
+    bulkRemoveEntryProbeLockRef.current = true;
+
+    try {
+      await checkSessionsBackendHealth();
+      invalidateBulkRemoveContext();
+      setSelectedDates(new Set());
+      setBatchMode("remove");
+    } catch {
+      setToast("資料庫未連線，暫時無法批量移除課次");
+    } finally {
+      bulkRemoveEntryProbeLockRef.current = false;
+    }
+  }
+
   function openRemoveRangeSheet() {
     // Destructive intent: never pre-fill a whole month by default.
     setRemoveRangeFrom("");
@@ -900,10 +931,9 @@ const handleDeleteSubmit = async () => {
   }
 
   async function runBulkRemovePreview() {
-    if (!isSessionsBackendAvailable) {
-      setToast("資料庫未連線，暫時無法批量移除課次");
-      return;
-    }
+    // No stale-availability early-return: the dryRun request below is the
+    // authoritative check. Offline -> fetch rejects -> catch fails closed;
+    // recovered backend must not be blocked by a stale false snapshot.
     const dates = Array.from(selectedDates).sort();
     if (dates.length === 0) return;
     // Synchronous re-entry guard: blocks a rapid second click before the
@@ -954,10 +984,9 @@ const handleDeleteSubmit = async () => {
   }
 
   async function runBulkRemoveCommit() {
-    if (!isSessionsBackendAvailable) {
-      setToast("資料庫未連線，暫時無法批量移除課次");
-      return;
-    }
+    // No stale-availability early-return: the dryRun=false request below is the
+    // authoritative check and fails closed on its own (catch leaves sessions /
+    // selection / mode intact). A recovered backend must not stay blocked.
     const dates = bulkRemovePreviewDates;
     if (dates.length === 0) return;
     // Synchronous re-entry guard for the destructive commit: ensures at most
@@ -1605,14 +1634,7 @@ const handleBatchClearHoliday = async () => {
                     {
                       label: "批量移除日期內課次",
                       onClick: () => {
-                        setBatchMenuOpen(false);
-                        if (!isSessionsBackendAvailable) {
-                          setToast("資料庫未連線，暫時無法批量移除課次");
-                          return;
-                        }
-                        invalidateBulkRemoveContext();
-                        setSelectedDates(new Set());
-                        setBatchMode("remove");
+                        void enterBulkRemoveMode();
                       },
                     },
                     {

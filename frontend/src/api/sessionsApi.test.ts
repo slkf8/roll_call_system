@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bulkDeleteSessions,
+  checkSessionsBackendHealth,
   createSession,
   deleteSession,
   fetchSessions,
@@ -639,5 +640,76 @@ describe("bulkDeleteSessions", () => {
     await expect(bulkDeleteSessions([], false)).rejects.toThrow(
       "Invalid bulk delete session response"
     );
+  });
+});
+
+
+describe("checkSessionsBackendHealth", () => {
+  it("resolves when GET /health returns 200 + { ok: true }", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ ok: true, dataDirFingerprint: "abc123" }),
+      }))
+    );
+
+    await expect(checkSessionsBackendHealth()).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:8000/health");
+  });
+
+  it("throws on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({ ok: true }),
+      }))
+    );
+
+    await expect(checkSessionsBackendHealth()).rejects.toThrow(
+      "Failed to check sessions backend health: 503"
+    );
+  });
+
+  it("throws when payload is not an object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => "not-an-object",
+      }))
+    );
+
+    await expect(checkSessionsBackendHealth()).rejects.toThrow(
+      "Invalid sessions backend health response"
+    );
+  });
+
+  it("throws when ok !== true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ ok: false }),
+      }))
+    );
+
+    await expect(checkSessionsBackendHealth()).rejects.toThrow(
+      "Invalid sessions backend health response"
+    );
+  });
+
+  it("propagates a network reject", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      })
+    );
+
+    await expect(checkSessionsBackendHealth()).rejects.toThrow("network down");
   });
 });

@@ -2,8 +2,12 @@ import "@testing-library/jest-dom/vitest";
 import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { bulkDeleteSessions, createSession } from "../../api/sessionsApi";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  bulkDeleteSessions,
+  checkSessionsBackendHealth,
+  createSession,
+} from "../../api/sessionsApi";
 import type {
   GlobalEvent,
   Session,
@@ -20,6 +24,7 @@ vi.mock("../../api/globalEventsApi", () => ({
 
 vi.mock("../../api/sessionsApi", () => ({
   bulkDeleteSessions: vi.fn(),
+  checkSessionsBackendHealth: vi.fn(),
   createSession: vi.fn(),
   deleteSession: vi.fn(),
   updateSession: vi.fn(),
@@ -192,6 +197,11 @@ async function openBatchMenu(user: ReturnType<typeof userEvent.setup>) {
 async function enterRemoveMode(user: ReturnType<typeof userEvent.setup>) {
   await openBatchMenu(user);
   await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+  // Entry now awaits a GET /health probe (mocked to resolve by default); wait
+  // for remove mode to become active before callers interact with it. Use the
+  // batch-bar header (stable regardless of preview-loading button label) so a
+  // re-entry while a previous preview is still pending ("處理中…") also works.
+  await screen.findByText(/已選取/);
 }
 
 // Sheet's date inputs (exclude the hidden header month picker).
@@ -200,6 +210,12 @@ function sheetDateInputs() {
     document.querySelectorAll<HTMLInputElement>('input[type="date"]')
   ).filter((input) => !input.className.includes("opacity-0"));
 }
+
+beforeEach(() => {
+  // Entry health probe resolves by default; tests that exercise the offline /
+  // recovery / pending paths override this per-case.
+  vi.mocked(checkSessionsBackendHealth).mockResolvedValue(undefined);
+});
 
 afterEach(() => {
   cleanup();
@@ -216,15 +232,18 @@ describe("MonthPage 批量操作 Menu 新增「批量移除日期內課次」", 
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
-    // Menu 收起後「收起」應消失，並進入批量模式 header
+    // Menu 收起後「收起」應消失，並進入批量模式 header（入口 health probe 解析後）
+    await screen.findByRole("button", { name: "預覽移除課次" });
     expect(screen.queryByRole("button", { name: "收起" })).not.toBeInTheDocument();
     expect(screen.getByText(/已選取 0 天/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "預覽移除課次" })
-    ).toBeInTheDocument();
+    expect(checkSessionsBackendHealth).toHaveBeenCalledTimes(1);
   });
 
-  it("backend 不可用時：不進入 remove mode 並顯示 Toast", async () => {
+  it("backend 不可用時（入口 health probe 失敗）：不進入 remove mode 並顯示 Toast", async () => {
+    // Authoritative liveness now comes from the entry probe, not the stale prop.
+    vi.mocked(checkSessionsBackendHealth).mockRejectedValueOnce(
+      new Error("offline")
+    );
     const { user, snapshot } = renderMonthPage({
       isSessionsBackendAvailable: false,
     });
@@ -891,6 +910,81 @@ describe("MonthPage remove mode：H2.1 退出後立即重新進入保留 preview
       ["2026-04-13"],
       true
     );
+  });
+});
+
+describe("MonthPage remove mode：入口即時 health probe（取代 stale availability snapshot）", () => {
+  it("A. health probe 成功 → 可進 remove mode（probe 呼叫 1 次）", async () => {
+    vi.mocked(checkSessionsBackendHealth).mockResolvedValueOnce(undefined);
+    const { user } = renderMonthPage({ isSessionsBackendAvailable: true });
+    await openBatchMenu(user);
+    await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+    expect(
+      await screen.findByRole("button", { name: "預覽移除課次" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/已選取 0 天/)).toBeInTheDocument();
+    expect(checkSessionsBackendHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it("B. stale prop=true 但 health probe 失敗 → Toast 且不進 remove mode（重現實際 defect）", async () => {
+    vi.mocked(checkSessionsBackendHealth).mockRejectedValueOnce(
+      new Error("offline after load")
+    );
+    const { user, snapshot } = renderMonthPage({
+      isSessionsBackendAvailable: true,
+    });
+    await openBatchMenu(user);
+    await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+    await waitFor(() =>
+      expect(snapshot.toasts).toContain(
+        "資料庫未連線，暫時無法批量移除課次"
+      )
+    );
+    // 必須未進入 remove mode：無批量模式 bar、無 remove 專用控制
+    expect(screen.getByRole("button", { name: "批量操作" })).toBeInTheDocument();
+    expect(screen.queryByText(/已選取/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "套用日期範圍" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "預覽移除課次" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("C. stale prop=false 但 health probe 成功 → 可進 remove mode（backend 恢復後免 reload）", async () => {
+    vi.mocked(checkSessionsBackendHealth).mockResolvedValueOnce(undefined);
+    const { user } = renderMonthPage({ isSessionsBackendAvailable: false });
+    await openBatchMenu(user);
+    await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+    expect(
+      await screen.findByRole("button", { name: "預覽移除課次" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/已選取 0 天/)).toBeInTheDocument();
+  });
+
+  it("D. probe pending 時快速連點 → health probe 僅 1 次，resolve 後正常進 mode", async () => {
+    const dprobe = deferred<undefined>();
+    vi.mocked(checkSessionsBackendHealth).mockReturnValueOnce(
+      dprobe.promise as Promise<void>
+    );
+    const { user } = renderMonthPage({ isSessionsBackendAvailable: true });
+    await openBatchMenu(user);
+    // 第一次點擊：Menu 收起、probe pending（entry lock 持有）
+    await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+    // probe 未解析前，重新開 Menu 再點一次（測試 harness 可靠重現的 UI 路徑）
+    await openBatchMenu(user);
+    await user.click(screen.getByRole("button", { name: "批量移除日期內課次" }));
+    expect(checkSessionsBackendHealth).toHaveBeenCalledTimes(1);
+    // 尚未進入 remove mode
+    expect(
+      screen.queryByRole("button", { name: "預覽移除課次" })
+    ).not.toBeInTheDocument();
+    // 解析 probe → 正常進入 remove mode
+    dprobe.resolve(undefined);
+    expect(
+      await screen.findByRole("button", { name: "預覽移除課次" })
+    ).toBeInTheDocument();
+    expect(checkSessionsBackendHealth).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -379,3 +379,24 @@ export async function bulkDeleteSessions(
     breakdown,
   };
 }
+
+
+// Lightweight liveness probe for destructive flows: a fresh GET /health is the
+// authoritative "is the backend reachable right now" check, used so a stale
+// mount-time availability snapshot can no longer let a destructive entry open
+// against an offline backend. Resolves on a healthy backend; throws otherwise
+// (network reject propagates naturally) so callers can fail closed.
+export async function checkSessionsBackendHealth(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/health`);
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to check sessions backend health: ${response.status}`
+    );
+  }
+
+  const data: unknown = await response.json();
+  if (!isRecord(data) || data.ok !== true) {
+    throw new Error("Invalid sessions backend health response");
+  }
+}
