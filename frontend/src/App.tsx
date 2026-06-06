@@ -580,6 +580,7 @@ export default function App() {
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
               students={students}
+              studentScheduleRules={studentScheduleRules}
               sessions={sessions}
               setSessions={setSessions}
               isSessionsBackendAvailable={isSessionsBackendAvailable}

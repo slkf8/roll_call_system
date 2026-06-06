@@ -23,13 +23,9 @@ import {
 } from "../shared/appShared";
 import {
   buildRegularSessionsInDates,
-  getDatesInRange,
-  getMonthEndISO,
   getMonthRemainingDates,
-  getMonthStartISO,
   isWithinMonthRemaining,
 } from "../shared/regularSessions";
-import type { RegularSessionCandidate } from "../shared/regularSessions";
 
 type StudentFilter = "all" | "active" | "scheduled_deactivation" | "inactive";
 type EditorMode = "create" | "edit";
@@ -78,10 +74,6 @@ function getNextStudentId(list: StudentProfile[]) {
 
 function getNextRuleId(list: StudentScheduleRule[]) {
   return list.reduce((max, item) => Math.max(max, item.id), 0) + 1;
-}
-
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
 }
 
 function formatWeekdayLabel(weekday: StudentScheduleRule["weekday"]) {
@@ -232,17 +224,6 @@ export default function StudentsPage({
   // 固定課表收起/展開（in-memory，不持久化；換 tab/重整即還原為全部收起）
   const [expandedScheduleStudentIds, setExpandedScheduleStudentIds] = useState<Set<number>>(
     () => new Set()
-  );
-
-  // 批量生成 regular 課次
-  const [batchSheetOpen, setBatchSheetOpen] = useState(false);
-  const [batchFromDate, setBatchFromDate] = useState("");
-  const [batchToDate, setBatchToDate] = useState("");
-  const [batchDateError, setBatchDateError] = useState("");
-  const [batchRunning, setBatchRunning] = useState(false);
-  // 年份快選（月份 chips 用）；只影響 chips 填入，不直接改日期範圍。
-  const [batchChipYear, setBatchChipYear] = useState<number>(
-    () => Number((todayISO() || "").slice(0, 4)) || new Date().getFullYear()
   );
 
   const todayStr = todayISO();
@@ -646,158 +627,6 @@ export default function StudentsPage({
       }
       return next;
     });
-  }
-
-  function openBatchSheet() {
-    const anchor = selectedDate || todayStr;
-    setBatchFromDate(getMonthStartISO(anchor));
-    setBatchToDate(getMonthEndISO(anchor));
-    setBatchChipYear(Number(anchor.slice(0, 4)) || new Date().getFullYear());
-    setBatchDateError("");
-    setBatchRunning(false);
-    setBatchSheetOpen(true);
-  }
-
-  // Quick-fill the range from a year + month chip. The user can still edit the
-  // start/end dates afterwards, and the range may span months/years.
-  function applyBatchMonthChip(month: number) {
-    const ym = `${batchChipYear}-${pad2(month)}`;
-    setBatchFromDate(getMonthStartISO(ym));
-    setBatchToDate(getMonthEndISO(ym));
-    setBatchDateError("");
-  }
-
-  // Highlight a chip only when the current range is exactly that whole month.
-  function isBatchMonthChipSelected(month: number) {
-    const ym = `${batchChipYear}-${pad2(month)}`;
-    return batchFromDate === getMonthStartISO(ym) && batchToDate === getMonthEndISO(ym);
-  }
-
-  function closeBatchSheet() {
-    setBatchSheetOpen(false);
-    setBatchDateError("");
-    setBatchRunning(false);
-  }
-
-  async function runBatchGenerateRegular() {
-    if (!selectedDate) {
-      setToast?.("缺少月份資訊，無法批量生成 regular 課次");
-      return;
-    }
-    if (!setSessions) {
-      setToast?.("缺少課次資料，無法批量生成 regular 課次");
-      return;
-    }
-    if (!batchFromDate || !batchToDate) {
-      setBatchDateError("請選擇開始與結束日期");
-      return;
-    }
-    if (batchFromDate > batchToDate) {
-      setBatchDateError("結束日期需晚於或等於開始日期");
-      return;
-    }
-
-    setBatchRunning(true);
-
-    const activeStudents = safeStudents.filter((student) => student.status === "active");
-    if (activeStudents.length === 0) {
-      setToast?.("沒有可批量生成的啟用中學生");
-      closeBatchSheet();
-      return;
-    }
-
-    const candidates: Array<{ student: StudentProfile; rules: StudentScheduleRule[] }> = [];
-    let noRuleStudentCount = 0;
-    for (const student of activeStudents) {
-      const rules = safeRules.filter(
-        (rule) => rule.studentId === student.id && rule.isActive
-      );
-      if (rules.length === 0) {
-        noRuleStudentCount++;
-      } else {
-        candidates.push({ student, rules });
-      }
-    }
-
-    const dates = getDatesInRange(batchFromDate, batchToDate);
-
-    // 逐學生累積 generated 進 runningBaseSessions，
-    // 讓下一位學生在 dedup 與 nextId 計算時都看到本輪同批產出。
-    let runningBaseSessions: Session[] = sessions ? [...sessions] : [];
-    const allGenerated: RegularSessionCandidate[] = [];
-    let totalSkipped = 0;
-    for (const { student, rules } of candidates) {
-      const { generatedSessions, skippedCount } = buildRegularSessionsInDates(
-        student,
-        rules,
-        runningBaseSessions,
-        dates
-      );
-      allGenerated.push(...generatedSessions);
-      totalSkipped += skippedCount;
-      runningBaseSessions = [
-        ...runningBaseSessions,
-        ...generatedSessions.map((item) => item.session),
-      ];
-    }
-
-    function buildToast(generatedCount: number) {
-      const parts: string[] = [];
-      if (generatedCount === 0) {
-        parts.push("範圍內沒有可新增的 regular 課次");
-      } else {
-        parts.push(`已批量生成 ${generatedCount} 堂 regular 課次`);
-      }
-      if (totalSkipped > 0) {
-        parts.push(`略過 ${totalSkipped} 堂已存在課次`);
-      }
-      if (noRuleStudentCount > 0) {
-        parts.push(`${noRuleStudentCount} 位學生沒有固定課表`);
-      }
-      return parts.join("，");
-    }
-
-    if (allGenerated.length === 0) {
-      setToast?.(buildToast(0));
-      closeBatchSheet();
-      return;
-    }
-
-    if (isSessionsBackendAvailable) {
-      try {
-        const createdSessions = await Promise.all(
-          allGenerated.map(({ session, scheduleRuleId }) =>
-            createSession({
-              studentId: session.studentId!,
-              dateISO: session.dateISO,
-              start: session.start,
-              durationMin: session.durationMin,
-              status: "pending",
-              reason: null,
-              note: null,
-              kind: "regular",
-              makeupOfDateISO: null,
-              makeupOfSessionId: null,
-              scheduleRuleId,
-            })
-          )
-        );
-        setSessions((current) => [...current, ...createdSessions]);
-      } catch (error) {
-        console.warn("Batch generate regular sessions failed", error);
-        setToast?.("批量生成 regular 失敗，請確認後端是否正常");
-        setBatchRunning(false);
-        return;
-      }
-    } else {
-      setSessions((current) => [
-        ...current,
-        ...allGenerated.map(({ session }) => session),
-      ]);
-    }
-
-    setToast?.(buildToast(allGenerated.length));
-    closeBatchSheet();
   }
 
   function closeRuleEditor() {
@@ -1397,29 +1226,6 @@ export default function StudentsPage({
               </div>
             ))}
           </div>
-
-          {safeStudents.length > 0 ? (
-            <div className={cardClass}>
-              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="text-[15px] font-semibold">批量操作</div>
-                  <div className="mt-1 text-[13px] leading-5 text-[#8E8E93]">
-                    對「啟用中且有固定課表」的學生在指定日期範圍內補齊固定課次，
-                    重複的時段會自動略過。
-                  </div>
-                </div>
-                <div className="sm:flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={openBatchSheet}
-                    className={primaryButtonClass}
-                  >
-                    批量生成固定課次
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           <div className="space-y-3">
             {safeStudents.length === 0 ? (
@@ -2056,121 +1862,6 @@ export default function StudentsPage({
         ) : null}
       </IOSSheet>
 
-      <IOSSheet
-        open={batchSheetOpen}
-        title="批量生成固定課次"
-        subtitle="在指定日期範圍內，依固定課表補齊課次。"
-        onClose={closeBatchSheet}
-        leftAction={{ label: "取消", onClick: closeBatchSheet }}
-        rightAction={{
-          label: batchRunning ? "處理中…" : "批量生成",
-          onClick: () => {
-            if (batchRunning) return;
-            void runBatchGenerateRegular();
-          },
-          emphasize: true,
-        }}
-      >
-        <div className="space-y-4">
-          <div className={cardClass}>
-            <div className="space-y-3 p-4">
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  aria-label="上一年"
-                  onClick={() => setBatchChipYear((y) => y - 1)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full text-[18px] font-semibold ${
-                    isDark ? "text-[#8E8E93] hover:bg-[#2C2C2E]" : "text-slate-600 hover:bg-[#F2F2F7]"
-                  }`}
-                >
-                  ‹
-                </button>
-                <div className="text-[15px] font-semibold">{batchChipYear} 年</div>
-                <button
-                  type="button"
-                  aria-label="下一年"
-                  onClick={() => setBatchChipYear((y) => y + 1)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full text-[18px] font-semibold ${
-                    isDark ? "text-[#8E8E93] hover:bg-[#2C2C2E]" : "text-slate-600 hover:bg-[#F2F2F7]"
-                  }`}
-                >
-                  ›
-                </button>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
-                  const selected = isBatchMonthChipSelected(month);
-                  return (
-                    <button
-                      key={month}
-                      type="button"
-                      aria-pressed={selected}
-                      aria-label={`${batchChipYear} 年 ${month} 月`}
-                      onClick={() => applyBatchMonthChip(month)}
-                      className={`rounded-2xl px-3 py-2 text-[14px] font-medium transition ${
-                        selected
-                          ? isDark
-                            ? "bg-[#0A84FF] text-white"
-                            : "bg-[#007AFF] text-white"
-                          : isDark
-                          ? "bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]"
-                          : "bg-[#F2F2F7] text-[#1C1C1E] ring-1 ring-[#E5E5EA] hover:bg-[#EAEAEE]"
-                      }`}
-                    >
-                      {month}月
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <div className="space-y-4 p-4">
-              <FieldRow label="開始日期">
-                <div className="w-full text-left">
-                  <input
-                    type="date"
-                    value={batchFromDate}
-                    onChange={(e) => {
-                      setBatchFromDate(e.target.value);
-                      if (batchDateError) setBatchDateError("");
-                    }}
-                    className={inputClass}
-                  />
-                </div>
-              </FieldRow>
-              <FieldRow label="結束日期">
-                <div className="w-full text-left">
-                  <input
-                    type="date"
-                    value={batchToDate}
-                    onChange={(e) => {
-                      setBatchToDate(e.target.value);
-                      if (batchDateError) setBatchDateError("");
-                    }}
-                    className={inputClass}
-                  />
-                </div>
-              </FieldRow>
-              {batchDateError ? (
-                <div className="text-xs text-red-500">{batchDateError}</div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <div className="space-y-2 p-4 text-[13px] leading-6 text-[#8E8E93]">
-              <div>
-                對象：啟用中且有固定課表的學生
-                （目前 {safeStudents.filter((s) => s.status === "active" && safeRules.some((r) => r.studentId === s.id && r.isActive)).length} 位）
-              </div>
-              <div>同學生、同日期、同開始時間的固定課次會自動略過，不會重複生成。</div>
-              <div>只會補齊缺少的固定課次，不影響補課與加課。</div>
-            </div>
-          </div>
-        </div>
-      </IOSSheet>
     </div>
   );
 }
