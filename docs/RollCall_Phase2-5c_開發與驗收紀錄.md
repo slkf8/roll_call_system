@@ -116,9 +116,9 @@
 
 ## 18. 已知限制與後續建議
 
-- **已完成**：Phase 2-5c 功能鏈、自動化 + 人工 + backend-unavailable + stop/restart 驗收、單一 push 與封存。
-- **待辦**：DataPage 正式模板 UI / fallback manual acceptance；RC9 尚未建立；新 package / binary smoke / artifact SHA 封存尚未執行；Windows 維修入口暫緩。
+- **已完成**：Phase 2-5c 功能鏈、自動化 + 人工 + backend-unavailable + stop/restart 驗收、單一 push 與封存；**DataPage 正式模板 UI / fallback manual acceptance（2026-06-07 PASS）** — backend-primary export、missing-column UI gate、browser local fallback、fallback toast 全部 PASS，backend-primary vs fallback 語義 diff 0 business differences，durable archive 已建立並驗證（詳見 [`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)）。
+- **待辦**：RC9 尚未建立；新 package / binary smoke / artifact SHA 封存尚未執行；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
   - `input[type=date]` 在 Codex in-app browser 有 native picker 自動化限制。
-- **建議下一步**：完成 DataPage 驗收 → 評估建立 RC9（需明確批准）→ 再評估 Windows 維修入口。
+- **建議下一步**：DataPage 驗收已完成 → 評估是否進入 RC9 packaging / binary smoke（需明確批准）→ 完成整合驗收後再決定 push → 再評估 Windows 維修入口。

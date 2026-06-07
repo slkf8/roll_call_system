@@ -8,7 +8,7 @@
 |---|---|
 | 文件對應 commit | `0118d0c139cdf3dee56d48c3e6b060d3cada7a9c` |
 | 撰寫時間 | 2026-06-07 |
-| workspace | `/Users/soulongkit/Documents/Vscode/roll_call_system` |
+| workspace | `~/Documents/Vscode/roll_call_system` |
 | 分支 | `main` |
 | Git 狀態 | clean，`## main...origin/main`（無 ahead/behind） |
 
@@ -111,7 +111,14 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 
 ## 10. 仍待處理項目
 
-- DataPage 正式模板 UI / fallback manual acceptance **尚未完成**。
+- ~~DataPage 正式模板 UI / fallback manual acceptance~~ → **已完成 PASS（2026-06-07）**。
+  - backend-primary export：PASS
+  - missing-column UI gate：PASS
+  - browser local fallback：PASS
+  - backend-primary vs fallback：0 business differences
+  - fallback toast：PASS
+  - durable archive：已建立並驗證
+  - 詳見 [`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)。
 - **尚未建立 RC9**。
 - **尚未執行**新的 package / binary smoke / artifact SHA 封存。
 - Windows 維修入口暫未處理（`maintenance_restore.bat`、`scripts/package_release.ps1` 整合、Windows portable package、Windows 實機 lock 驗收）。

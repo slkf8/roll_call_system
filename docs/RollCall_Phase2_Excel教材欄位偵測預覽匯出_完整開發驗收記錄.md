@@ -244,3 +244,49 @@ remote main : b60f4b24ad3e78e9900dd7554ee7f11cac59ad23
 4. **Phase 1 UX**：學年回退提示字色偏淡。
 
 > 以上皆非 Phase 2 阻塞項；Phase 1 UX 兩項屬既有事項，留待後續處理。
+
+## 15. Browser local fallback 端到端人工驗收結案
+
+**驗收結論：** `DATAPAGE_OFFICIAL_TEMPLATE_EXPORT_ACCEPTANCE_PASS`（2026-06-07）
+
+**隔離 lane：**
+
+- frontend `:5199`
+- backend `:8123`
+
+**逐項結果：**
+
+| 項目 | 結果 |
+|---|---|
+| backend-primary | PASS |
+| missing-column UI gate | PASS |
+| browser local fallback | PASS |
+
+**fallback toast（逐字）：**
+
+```
+後端匯出失敗，已使用本地匯出
+已匯出並填入 5 筆資料
+```
+
+**backend-primary vs fallback semantic diff：**
+
+```
+worksheet range：A1:CX1000
+cell value diffs = 0
+data type diffs = 0
+formula diffs = 0
+merged range diffs = 0
+critical number-format diffs = 0
+result：SEMANTICALLY_EQUIVALENT_WITH_NONCRITICAL_FORMAT_METADATA_DIFFERENCES
+```
+
+> 與 §14 備註 1（packaged 同源、backend 完全離線時 fallback chunk 可用性限制）的關係：
+> 本次驗收使用 dev 分離來源隔離 lane，與 packaged 同源但 backend 完全離線時的 fallback chunk
+> 可用性限制屬不同情境，兩者互補而非矛盾。§14 備註 1 保留有效。
+
+**證據：**
+
+- 獨立 acceptance summary：[`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)
+- durable evidence archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_FallbackAcceptance_2026-06-07_XmQgul/`
+- 短期暫存副本（可日後清除）：`/private/tmp/RollCall_DataPage_FallbackAcceptance.XmQgul`

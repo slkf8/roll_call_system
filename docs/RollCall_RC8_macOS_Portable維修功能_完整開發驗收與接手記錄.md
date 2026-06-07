@@ -368,7 +368,7 @@ README 維修說明存在
 
 ```text
 workspace：
-/Users/soulongkit/Documents/Vscode/roll_call_system
+~/Documents/Vscode/roll_call_system
 
 branch：
 main
