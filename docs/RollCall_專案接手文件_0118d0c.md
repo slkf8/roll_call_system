@@ -33,8 +33,10 @@
 | local main / origin/main tracking / remote main | `0118d0c139cdf3dee56d48c3e6b060d3cada7a9c`（三者一致） |
 | Git worktree | clean |
 | RC baseline | **RC8**（仍為現行 release baseline） |
-| RC9 | **尚未建立** |
-| 重新 package / binary | **尚未執行** |
+| RC9 tag | **尚未建立**（預定 lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`，tag push 尚未執行） |
+| 重新 package / binary | **RC9 package + binary smoke 已完成 PASS（2026-06-07）** |
+| RC9 artifact | `release/RollCall_Portable_macOS_RC9.zip` |
+| RC9 artifact SHA-256 | `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`（MD5 `a9dc9a00987559c53a827bf83afdf9b9`、size 21221405；詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)） |
 | RC8 tag | `portable-release-candidate-8` → `2f91adaa12e775b41a2ca6fc5d58dd746f2373ec` |
 | RC8 artifact | `release/RollCall_Portable_macOS_RC8.zip` |
 | RC8 artifact SHA-256 | `64c775db3f6791af2f4bc20256105da4b24139ac0749bfe98b2fb8546fbb567d` |
@@ -119,8 +121,10 @@ d7005d0 refactor(sessions): extract regular session generation helpers
   - fallback toast：PASS
   - durable archive：已建立並驗證
   - 詳見 [`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)。
-- **尚未建立 RC9**。
-- **尚未執行**新的 package / binary smoke / artifact SHA 封存。
+- ~~尚未執行新的 package / binary smoke / artifact SHA 封存~~ → **RC9 package / binary smoke / artifact SHA 已完成 PASS（2026-06-07）**。
+  - RC9 artifact：`release/RollCall_Portable_macOS_RC9.zip`（SHA256 `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`）
+  - 詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)
+  - **仍 pending**：`portable-release-candidate-9` tag **尚未建立**、RC9 tag push **尚未執行**、本輪 RC9 docs commit / main push 尚未執行。
 - Windows 維修入口暫未處理（`maintenance_restore.bat`、`scripts/package_release.ps1` 整合、Windows portable package、Windows 實機 lock 驗收）。
 
 ## 11. 後續工作流規則
@@ -134,6 +138,9 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 
 ## 12. 下一個建議 Phase
 
-1. 完成 DataPage 正式模板 UI / fallback 的人工驗收並補文件。
-2. 評估是否建立 **RC9**（含新 package、binary smoke、artifact SHA 封存）——需使用者明確批准。
+1. ~~完成 DataPage 正式模板 UI / fallback 的人工驗收並補文件~~ → 已完成（PASS，docs 已封存並 push 至 `origin/main`）。
+2. ~~評估是否建立 RC9（含新 package、binary smoke、artifact SHA 封存）~~ → RC9 package / binary smoke / artifact SHA **已完成 PASS**。後續工作：
+   - 建立 lightweight tag `portable-release-candidate-9` → 明確指向 `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`
+   - 單一 tag push（需使用者明確批准）
+   - 再處理本輪 RC9 docs commit 與 main push 決策
 3. 之後再評估 Windows 維修入口整合。
