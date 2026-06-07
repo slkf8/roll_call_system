@@ -24,6 +24,7 @@ import {
   parseISO,
   reasonsSeed,
   todayISO,
+  computeDefaultSchoolYear,
   formatMaterialsBadge,
   resolveSchoolYearRange,
   isWithinSchoolYear,
@@ -38,6 +39,10 @@ import {
   writeSchoolYearOverride,
   clearSchoolYearOverride,
 } from "../shared/schoolYearStorage";
+import {
+  calculateTeacherServiceStatsByMonthRange,
+  validateMonthRange,
+} from "../shared/teacherServiceRange";
 
 // 白名單：只顯示缺席 Bottom Sheet 提供的預設原因，排除歷史/自訂字串。
 // 單一事實來源 = reasonsSeed（新增「天氣」後自動納入）。
@@ -172,6 +177,18 @@ function formatMonthShortLabel(dateISO: string) {
 function formatMonthToken(dateISO: string) {
   const anchor = parseMonthAnchor(dateISO);
   return `${anchor.getFullYear()}-${pad2(anchor.getMonth() + 1)}`;
+}
+
+function formatMonthTokenForDisplay(month: string) {
+  return month.replace("-", "/");
+}
+
+function getDefaultTeacherServiceMonthRange(dateISO: string) {
+  const range = computeDefaultSchoolYear(dateISO);
+  return {
+    startMonth: range.startISO.slice(0, 7),
+    endMonth: range.endISO.slice(0, 7),
+  };
 }
 
 function formatDateISO(date: Date) {
@@ -784,6 +801,9 @@ export default function DataPage({
   const [schoolYearSheetOpen, setSchoolYearSheetOpen] = useState(false);
   const [syStartInput, setSyStartInput] = useState("");
   const [syEndInput, setSyEndInput] = useState("");
+  const [serviceStatsSheetOpen, setServiceStatsSheetOpen] = useState(false);
+  const [rangeStartMonth, setRangeStartMonth] = useState("");
+  const [rangeEndMonth, setRangeEndMonth] = useState("");
 
   const monthRange = useMemo(() => getMonthRange(selectedDate), [selectedDate]);
   const monthLabel = formatMonthLabel(selectedDate);
@@ -982,6 +1002,31 @@ export default function DataPage({
     return n;
   }, [reason6CountByStudent]);
 
+  const rangeValidation = useMemo(
+    () => validateMonthRange(rangeStartMonth, rangeEndMonth),
+    [rangeStartMonth, rangeEndMonth]
+  );
+  const rangeValidationError = rangeValidation.isValid ? "" : rangeValidation.message;
+  const rangeStats = useMemo(
+    () =>
+      rangeValidation.isValid
+        ? calculateTeacherServiceStatsByMonthRange(sessions, rangeStartMonth, rangeEndMonth)
+        : { presentCount: 0, materialsCount: 0, teacherServiceTotal: 0 },
+    [sessions, rangeStartMonth, rangeEndMonth, rangeValidation.isValid]
+  );
+
+  function openServiceStatsSheet() {
+    const defaultRange = getDefaultTeacherServiceMonthRange(selectedDate);
+    setRangeStartMonth(defaultRange.startMonth);
+    setRangeEndMonth(defaultRange.endMonth);
+    setServiceStatsSheetOpen(true);
+  }
+
+  function closeServiceStatsSheetIfValid() {
+    if (!rangeValidation.isValid) return;
+    setServiceStatsSheetOpen(false);
+  }
+
   function openSchoolYearSheet() {
     setSyStartInput(schoolYearRange.startISO);
     setSyEndInput(schoolYearRange.endISO);
@@ -1138,8 +1183,8 @@ export default function DataPage({
 
   const pageBg = isDark ? "bg-[#111214] text-white" : "bg-[#F2F2F7] text-[#1C1C1E]";
   const cardClass = isDark
-    ? "rounded-[24px] bg-[#1C1C1E] ring-1 ring-white/10 shadow-sm"
-    : "rounded-[24px] bg-white ring-1 ring-[#E5E5EA] shadow-sm";
+    ? "min-w-0 rounded-[24px] bg-[#1C1C1E] ring-1 ring-white/10 shadow-sm"
+    : "min-w-0 rounded-[24px] bg-white ring-1 ring-[#E5E5EA] shadow-sm";
   const mutedTextClass = isDark ? "text-[#8E8E93]" : "text-slate-500";
   const tableHeadClass = isDark
     ? "border-white/10 bg-[#2C2C2E] text-[#D1D1D6]"
@@ -1154,6 +1199,13 @@ export default function DataPage({
   const selectClass = isDark
     ? "w-full rounded-2xl border border-white/10 bg-[#2C2C2E] px-4 py-3 text-[15px] text-white outline-none"
     : "w-full rounded-2xl border border-[#E5E5EA] bg-white px-4 py-3 text-[15px] text-[#1C1C1E] outline-none";
+  const monthInputClass = isDark
+    ? "w-full rounded-2xl border border-white/10 bg-[#2C2C2E] px-3 py-2 text-right text-sm text-white outline-none focus:ring-2 focus:ring-white/10"
+    : "w-full rounded-2xl border border-[#E5E5EA] bg-white px-3 py-2 text-right text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-[#C7DAFF]";
+  const studentSummaryTableClass =
+    "w-full table-fixed border-separate border-spacing-0 text-left text-[10px] leading-tight sm:text-[13px]";
+  const studentSummaryHeadCellClass = `sticky top-0 z-10 border-b break-words px-1 py-2 font-semibold sm:px-3 sm:py-3 ${tableHeadClass}`;
+  const studentSummaryCellClass = `border-b break-words px-1 py-2 sm:px-3 sm:py-3 ${tableCellClass}`;
 
   const serviceCards = [
     { label: "本月出席次數", value: displaySummary.presentCount },
@@ -1482,10 +1534,17 @@ export default function DataPage({
 
           <section>
             <div className="grid gap-3 lg:grid-cols-[1.25fr_2fr]">
-              <div className={cardClass}>
+              <button
+                type="button"
+                className={`${cardClass} w-full text-left transition active:scale-[0.99]`}
+                onClick={openServiceStatsSheet}
+              >
                 <div className="p-5">
-                  <div className={`text-[13px] font-medium ${mutedTextClass}`}>
-                    老師服務總次數
+                  <div className="flex items-center justify-between gap-3">
+                    <div className={`text-[13px] font-medium ${mutedTextClass}`}>
+                      老師服務總次數
+                    </div>
+                    <IconChevronRight className={`h-4 w-4 ${mutedTextClass}`} />
                   </div>
                   <div className="mt-3 text-[48px] font-extrabold leading-none tracking-[-0.06em]">
                     {displaySummary.teacherServiceTotal}
@@ -1495,7 +1554,7 @@ export default function DataPage({
                     {displaySummary.materialsCount}
                   </div>
                 </div>
-              </div>
+              </button>
 
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {serviceCards.map((item) => (
@@ -1572,15 +1631,15 @@ export default function DataPage({
                 </div>
               </div>
 
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-separate border-spacing-0 text-left text-[13px]">
+              <div className="mt-4">
+                <table className={studentSummaryTableClass}>
                   <thead>
                     <tr>
                       {["學生", "生日", "學校", "狀態", "regular", "makeup", "extra", "教材", "合計"].map(
                         (label) => (
                           <th
                             key={label}
-                            className={`border-b px-3 py-3 font-semibold first:rounded-tl-2xl last:rounded-tr-2xl ${tableHeadClass}`}
+                            className={`${studentSummaryHeadCellClass} first:rounded-tl-2xl last:rounded-tr-2xl`}
                           >
                             {label}
                           </th>
@@ -1605,8 +1664,8 @@ export default function DataPage({
                             aria-controls={detailRowId}
                             className={hoverRowClass}
                           >
-                            <td className={`border-b px-3 py-3 font-semibold ${tableCellClass}`}>
-                              <span className="inline-flex items-center gap-1">
+                            <td className={`${studentSummaryCellClass} font-semibold`}>
+                              <span className="inline-flex flex-wrap items-center gap-1">
                                 <span
                                   aria-hidden="true"
                                   className={`text-[12px] ${mutedTextClass}`}
@@ -1619,7 +1678,7 @@ export default function DataPage({
                                   if (r6 <= REASON6_PER_SCHOOL_YEAR_LIMIT) return null;
                                   return (
                                     <span
-                                      className={`ml-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                      className={`ml-1 inline-flex max-w-full items-center whitespace-normal rounded-full px-2 py-0.5 text-[10px] font-semibold sm:text-[11px] ${
                                         isDark
                                           ? "bg-amber-900/20 text-amber-400"
                                           : "bg-amber-50 text-amber-700"
@@ -1631,28 +1690,28 @@ export default function DataPage({
                                 })()}
                               </span>
                             </td>
-                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                            <td className={`${studentSummaryCellClass} ${mutedTextClass}`}>
                               {row.student.birthday || "-"}
                             </td>
-                            <td className={`border-b px-3 py-3 ${mutedTextClass} ${tableCellClass}`}>
+                            <td className={`${studentSummaryCellClass} ${mutedTextClass}`}>
                               {row.student.school || "-"}
                             </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                            <td className={studentSummaryCellClass}>
                               {formatStatus(row.student.status)}
                             </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                            <td className={studentSummaryCellClass}>
                               {row.regularPresentCount}
                             </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                            <td className={studentSummaryCellClass}>
                               {row.makeupPresentCount}
                             </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                            <td className={studentSummaryCellClass}>
                               {row.extraPresentCount}
                             </td>
-                            <td className={`border-b px-3 py-3 ${tableCellClass}`}>
+                            <td className={studentSummaryCellClass}>
                               {row.materialsCount}
                             </td>
-                            <td className={`border-b px-3 py-3 font-bold ${tableCellClass}`}>
+                            <td className={`${studentSummaryCellClass} font-bold`}>
                               {row.totalPresentCount}
                             </td>
                           </tr>
@@ -2171,6 +2230,72 @@ export default function DataPage({
         </div>
       </div>
     </div>
+    <IOSSheet
+      open={serviceStatsSheetOpen}
+      title="老師服務統計"
+      subtitle="統計月份範圍"
+      leftAction={{ label: "取消", onClick: () => setServiceStatsSheetOpen(false) }}
+      rightAction={{
+        label: "完成",
+        onClick: closeServiceStatsSheetIfValid,
+        emphasize: true,
+      }}
+      onClose={() => setServiceStatsSheetOpen(false)}
+    >
+      <div className="space-y-4">
+        <div className="space-y-3">
+          <FieldRow label="開始月份">
+            <input
+              type="month"
+              aria-label="開始月份"
+              value={rangeStartMonth}
+              onChange={(event) => setRangeStartMonth(event.target.value)}
+              className={monthInputClass}
+            />
+          </FieldRow>
+          <FieldRow label="結束月份">
+            <input
+              type="month"
+              aria-label="結束月份"
+              value={rangeEndMonth}
+              onChange={(event) => setRangeEndMonth(event.target.value)}
+              className={monthInputClass}
+            />
+          </FieldRow>
+        </div>
+
+        {rangeValidationError ? (
+          <div
+            role="alert"
+            className={`rounded-2xl px-4 py-3 text-[13px] font-semibold ${
+              isDark ? "bg-[#3A2A12] text-[#FFD60A]" : "bg-[#FFF4CC] text-[#8A5A00]"
+            }`}
+          >
+            {rangeValidationError}
+          </div>
+        ) : null}
+
+        {!rangeValidationError ? (
+          <div className={`rounded-[20px] p-4 ${isDark ? "bg-[#111214]" : "bg-[#F2F2F7]"}`}>
+            <div className={`text-[13px] font-medium ${mutedTextClass}`}>累積服務總次數</div>
+            <div className="mt-3 text-[42px] font-extrabold leading-none tracking-[-0.05em]">
+              {rangeStats.teacherServiceTotal}
+            </div>
+            <div className={`mt-3 text-[13px] leading-5 ${mutedTextClass}`}>
+              正常出席 {rangeStats.presentCount} · 教材 {rangeStats.materialsCount}
+            </div>
+            <div className={`mt-2 text-[12px] ${mutedTextClass}`}>
+              {rangeStartMonth && rangeEndMonth
+                ? `${formatMonthTokenForDisplay(rangeStartMonth)} – ${formatMonthTokenForDisplay(
+                    rangeEndMonth
+                  )}`
+                : "—"}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </IOSSheet>
+
     <IOSSheet
       open={isExportConfirmOpen}
       title="匯出前確認"

@@ -36,7 +36,11 @@ function setStoredAppData(data: unknown) {
 
 function getValueNearLabel(label: string) {
   const labelNode = screen.getAllByText(label)[0];
-  const container = labelNode.parentElement;
+  const container =
+    labelNode.closest("button") ??
+    (labelNode.parentElement?.textContent?.trim() === label
+      ? labelNode.parentElement.parentElement
+      : labelNode.parentElement);
   if (!container) throw new Error(`Container not found for ${label}`);
   return within(container);
 }

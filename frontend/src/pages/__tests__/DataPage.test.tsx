@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
@@ -519,7 +519,11 @@ function renderDataPage(options: {
 
 function getValueNearLabel(label: string) {
   const labelNode = screen.getAllByText(label)[0];
-  const container = labelNode.parentElement;
+  const container =
+    labelNode.closest("button") ??
+    (labelNode.parentElement?.textContent?.trim() === label
+      ? labelNode.parentElement.parentElement
+      : labelNode.parentElement);
   if (!container) throw new Error(`Container not found for ${label}`);
   return within(container);
 }
@@ -536,6 +540,13 @@ function getSectionByHeading(text: string) {
   const section = heading.closest("section");
   if (!section) throw new Error(`Section not found for ${text}`);
   return section as HTMLElement;
+}
+
+function getServiceStatsSheet() {
+  const title = screen.getByText("老師服務統計");
+  const sheet = title.closest(".fixed");
+  if (!sheet) throw new Error("Service stats sheet not found");
+  return sheet as HTMLElement;
 }
 
 function getSelect(label: string) {
@@ -595,6 +606,172 @@ describe("DataPage", () => {
     expect(getValueNearLabel("本月缺席次數").getByText("1")).toBeInTheDocument();
     expect(getValueNearLabel("未完成點名").getByText("1")).toBeInTheDocument();
     expect(getValueNearLabel("本月課次總數").getByText("8")).toBeInTheDocument();
+  });
+
+  it("opens the teacher-service range sheet from a clickable card with a chevron", async () => {
+    const sessions: Session[] = [
+      ...makeSessions(),
+      {
+        id: 20,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2027-01-10",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        materialsProvided: true,
+        materialsReasonCode: 4,
+      },
+    ];
+    const { user } = renderDataPage({ initialSessions: sessions });
+
+    const card = screen.getByRole("button", { name: /老師服務總次數/ });
+    expect(card.querySelector("svg")).toBeInTheDocument();
+
+    await user.click(card);
+
+    expect(screen.getByText("老師服務統計")).toBeInTheDocument();
+    expect(screen.getByLabelText("開始月份")).toHaveValue("2026-09");
+    expect(screen.getByLabelText("結束月份")).toHaveValue("2027-08");
+    const statsCard = getValueNearLabel("累積服務總次數");
+    expect(statsCard.getByText("8")).toBeInTheDocument();
+    expect(statsCard.getByText(/正常出席\s+7\s+· 教材\s+1/)).toBeInTheDocument();
+  });
+
+  it("updates range totals when the teacher-service sheet months change", async () => {
+    const sessions: Session[] = [
+      ...makeSessions(),
+      {
+        id: 20,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2025-12-10",
+        start: "10:00",
+        durationMin: 60,
+        status: "present",
+        kind: "extra",
+        materialsProvided: false,
+        materialsReasonCode: null,
+      },
+      {
+        id: 21,
+        studentId: 1,
+        student: { id: 1, name: "陳小明" },
+        dateISO: "2026-01-10",
+        start: "10:00",
+        durationMin: 60,
+        status: "absent",
+        kind: "regular",
+        materialsProvided: true,
+        materialsReasonCode: 6,
+      },
+    ];
+    const { user } = renderDataPage({
+      initialSelectedDate: "2026-11-15",
+      initialSessions: sessions,
+    });
+
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    expect(getValueNearLabel("累積服務總次數").getByText("7")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("開始月份"), { target: { value: "2025-12" } });
+    fireEvent.change(screen.getByLabelText("結束月份"), { target: { value: "2026-01" } });
+
+    const statsCard = getValueNearLabel("累積服務總次數");
+    expect(statsCard.getByText("2")).toBeInTheDocument();
+    expect(statsCard.getByText(/正常出席\s+1\s+· 教材\s+1/)).toBeInTheDocument();
+  });
+
+  it("blocks invalid teacher-service ranges and resets to the default when reopened", async () => {
+    const { user } = renderDataPage({ initialSelectedDate: "2026-01-15" });
+
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    expect(screen.getByLabelText("開始月份")).toHaveValue("2025-09");
+    expect(screen.getByLabelText("結束月份")).toHaveValue("2026-08");
+
+    fireEvent.change(screen.getByLabelText("開始月份"), { target: { value: "2026-02" } });
+    fireEvent.change(screen.getByLabelText("結束月份"), { target: { value: "2026-01" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("開始月份不可晚於結束月份");
+    expect(within(getServiceStatsSheet()).queryByText("累積服務總次數")).not.toBeInTheDocument();
+    expect(within(getServiceStatsSheet()).queryByText(/正常出席\s+0\s+· 教材\s+0/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "完成" }));
+    expect(screen.getByText("老師服務統計")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("結束月份"), { target: { value: "2027-02" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("月份範圍最多 12 個月");
+    expect(within(getServiceStatsSheet()).queryByText("累積服務總次數")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    expect(screen.getByLabelText("開始月份")).toHaveValue("2025-09");
+    expect(screen.getByLabelText("結束月份")).toHaveValue("2026-08");
+  });
+
+  it("treats empty teacher-service month fields as invalid without showing stats", async () => {
+    const { user } = renderDataPage({ initialSelectedDate: "2026-01-15" });
+
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    expect(screen.getByLabelText("開始月份")).toHaveValue("2025-09");
+    expect(screen.getByLabelText("結束月份")).toHaveValue("2026-08");
+
+    fireEvent.change(screen.getByLabelText("開始月份"), { target: { value: "" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("請選擇有效月份");
+    expect(within(getServiceStatsSheet()).queryByText("累積服務總次數")).not.toBeInTheDocument();
+    expect(within(getServiceStatsSheet()).queryByText(/正常出席\s+0\s+· 教材\s+0/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "完成" }));
+    expect(screen.getByText("老師服務統計")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("開始月份"), { target: { value: "2025-09" } });
+    fireEvent.change(screen.getByLabelText("結束月份"), { target: { value: "" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("請選擇有效月份");
+    expect(within(getServiceStatsSheet()).queryByText("累積服務總次數")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText("老師服務統計")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    expect(screen.getByLabelText("開始月份")).toHaveValue("2025-09");
+    expect(screen.getByLabelText("結束月份")).toHaveValue("2026-08");
+    expect(screen.getByText("累積服務總次數")).toBeInTheDocument();
+  });
+
+  it("does not persist teacher-service range changes or call POST", async () => {
+    const store = installLocalStorage();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { user } = renderDataPage();
+
+    await user.click(screen.getByRole("button", { name: /老師服務總次數/ }));
+    fireEvent.change(screen.getByLabelText("開始月份"), { target: { value: "2026-10" } });
+    await user.click(screen.getByRole("button", { name: "完成" }));
+
+    expect(store.size).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the student attendance table headers sticky", () => {
+    renderDataPage();
+
+    const section = getSectionByHeading("每學生出席次數");
+    const headers = within(section).getAllByRole("columnheader");
+    expect(headers[0]).toHaveClass("sticky", "top-0", "z-10");
+    const table = headers[0].closest("table");
+    expect(table).toHaveClass("w-full", "table-fixed");
+    expect(table?.parentElement).not.toHaveClass("overflow-x-auto");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "學生",
+      "生日",
+      "學校",
+      "狀態",
+      "regular",
+      "makeup",
+      "extra",
+      "教材",
+      "合計",
+    ]);
   });
 
   it("loads backend statistics for the selected month", async () => {
@@ -1441,7 +1618,7 @@ describe("DataPage", () => {
     await waitFor(() =>
       expect(getValueNearLabel("老師服務總次數").getByText("7")).toBeInTheDocument()
     );
-    const card = screen.getByText("老師服務總次數").parentElement as HTMLElement;
+    const card = screen.getByRole("button", { name: /老師服務總次數/ });
     expect(card.textContent).toContain("正常出席 5");
     expect(card.textContent).toContain("教材 2");
   });
