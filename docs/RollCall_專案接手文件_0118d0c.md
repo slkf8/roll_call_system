@@ -33,7 +33,7 @@
 | local main / origin/main tracking / remote main | `0118d0c139cdf3dee56d48c3e6b060d3cada7a9c`（三者一致） |
 | Git worktree | clean |
 | RC baseline | **RC8**（仍為現行 release baseline） |
-| RC9 tag | **尚未建立**（預定 lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`，tag push 尚未執行） |
+| RC9 tag | **已建立並單獨 push**：lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit） |
 | 重新 package / binary | **RC9 package + binary smoke 已完成 PASS（2026-06-07）** |
 | RC9 artifact | `release/RollCall_Portable_macOS_RC9.zip` |
 | RC9 artifact SHA-256 | `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`（MD5 `a9dc9a00987559c53a827bf83afdf9b9`、size 21221405；詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)） |
@@ -124,7 +124,8 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 - ~~尚未執行新的 package / binary smoke / artifact SHA 封存~~ → **RC9 package / binary smoke / artifact SHA 已完成 PASS（2026-06-07）**。
   - RC9 artifact：`release/RollCall_Portable_macOS_RC9.zip`（SHA256 `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`）
   - 詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)
-  - **仍 pending**：`portable-release-candidate-9` tag **尚未建立**、RC9 tag push **尚未執行**、本輪 RC9 docs commit / main push 尚未執行。
+  - `portable-release-candidate-9` lightweight tag **已建立並單獨 push** → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit）。
+  - **仍 pending**：第一個 RC9 docs commit `35ef02c123acafdd083dfe722befdf9e0054866b` 已於本機建立；本輪 tag post-push 文件狀態更新尚未 commit；RC9 docs commits **尚未 push 至 `origin/main`**。
 - Windows 維修入口暫未處理（`maintenance_restore.bat`、`scripts/package_release.ps1` 整合、Windows portable package、Windows 實機 lock 驗收）。
 
 ## 11. 後續工作流規則
@@ -139,8 +140,7 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 ## 12. 下一個建議 Phase
 
 1. ~~完成 DataPage 正式模板 UI / fallback 的人工驗收並補文件~~ → 已完成（PASS，docs 已封存並 push 至 `origin/main`）。
-2. ~~評估是否建立 RC9（含新 package、binary smoke、artifact SHA 封存）~~ → RC9 package / binary smoke / artifact SHA **已完成 PASS**。後續工作：
-   - 建立 lightweight tag `portable-release-candidate-9` → 明確指向 `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`
-   - 單一 tag push（需使用者明確批准）
-   - 再處理本輪 RC9 docs commit 與 main push 決策
+2. ~~評估是否建立 RC9（含新 package、binary smoke、artifact SHA 封存）~~ → RC9 package / binary smoke / artifact SHA **已完成 PASS**；lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543` **已建立並單獨 push**。後續工作：
+   - 完成 RC9 tag post-push docs diff QA → 精準 stage → 建立第二個本機 docs-only commit
+   - 集中 push `main` 上的 RC9 docs commits（需使用者明確批准）
 3. 之後再評估 Windows 維修入口整合。

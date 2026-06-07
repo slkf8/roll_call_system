@@ -7,9 +7,9 @@
 ## Provenance
 
 - build source commit：`cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（= 當時 origin/main HEAD）
-- future lightweight tag：`portable-release-candidate-9`
-- future tag target：`cca9498fef8d0ffaaa44ab4e506ab8202fda8543`
-- tag state：**尚未建立**
+- lightweight tag：`portable-release-candidate-9`
+- tag target：`cca9498fef8d0ffaaa44ab4e506ab8202fda8543`
+- tag state：**已建立並單獨 push**（local = remote → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`，object type commit）
 
 ## Artifact
 
@@ -64,8 +64,8 @@
 
 ## Remaining work
 
-- `portable-release-candidate-9` **尚未建立**
-- RC9 tag push **尚未執行**
-- 本輪 RC9 docs commit **尚未建立**
-- 本輪 docs push **尚未執行**
+- `portable-release-candidate-9` lightweight tag **已建立並單獨 push** → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote）
+- 第一個 RC9 docs commit `35ef02c123acafdd083dfe722befdf9e0054866b` **已於本機建立**
+- 本輪 tag post-push 文件狀態更新 **尚未 commit**
+- RC9 docs commits **尚未 push 至 `origin/main`**
 - Windows 維修入口仍 **out-of-scope**

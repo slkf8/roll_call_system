@@ -118,8 +118,9 @@
 
 - **已完成**：Phase 2-5c 功能鏈、自動化 + 人工 + backend-unavailable + stop/restart 驗收、單一 push 與封存；**DataPage 正式模板 UI / fallback manual acceptance（2026-06-07 PASS）** — backend-primary export、missing-column UI gate、browser local fallback、fallback toast 全部 PASS，backend-primary vs fallback 語義 diff 0 business differences，durable archive 已建立並驗證（詳見 [`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)）。
 - **已完成（RC9，2026-06-07）**：RC9 clean binary build、portable package、artifact SHA 封存、packaged binary 隔離 smoke 全部 PASS。RC9 artifact `release/RollCall_Portable_macOS_RC9.zip`，SHA256 `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`（詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)）。
-- **待辦**：`portable-release-candidate-9` tag 尚未建立、RC9 tag push 尚未執行；Windows 維修入口暫緩。
+- **已完成（RC9 tag）**：lightweight tag `portable-release-candidate-9` 已建立並單獨 push → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit）。
+- **待辦**：本輪 RC9 docs commits 尚未 push 至 `origin/main`；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
   - `input[type=date]` 在 Codex in-app browser 有 native picker 自動化限制。
-- **建議下一步**：RC9 package / binary smoke / artifact SHA 已完成 → 建立 lightweight tag `portable-release-candidate-9`（指向 `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`）→ 單一 tag push → 再決定是否 push 後續 docs commit（皆需明確批准）→ 再評估 Windows 維修入口。
+- **建議下一步**：RC9 tag 已建立並單獨 push → 完成 RC9 tag post-push docs 狀態更新 → docs-only diff QA → 第二個本機 docs-only commit → 集中 push `main` 上的 RC9 docs commits（需明確批准）→ 再評估 Windows 維修入口。

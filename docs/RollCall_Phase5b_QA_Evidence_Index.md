@@ -114,4 +114,4 @@ seed 概要（月份 2026-06，全為 synthetic 假名）：
 
 - 自動化 + 人工 UI + backend-unavailable + stop/restart 驗收皆 **PASS**。
 - 功能鏈已封存於 `origin/main @ 0118d0c139cdf3dee56d48c3e6b060d3cada7a9c`。
-- RC8 baseline 維持：`portable-release-candidate-8` → `2f91adaa12e775b41a2ca6fc5d58dd746f2373ec`；artifact SHA-256 `64c775db3f6791af2f4bc20256105da4b24139ac0749bfe98b2fb8546fbb567d`（未變動，尚未建立 RC9）。
+- RC8 baseline 維持：`portable-release-candidate-8` → `2f91adaa12e775b41a2ca6fc5d58dd746f2373ec`；artifact SHA-256 `64c775db3f6791af2f4bc20256105da4b24139ac0749bfe98b2fb8546fbb567d`（RC8 artifact 未變動）。RC9 lightweight tag `portable-release-candidate-9` 已建立並單獨 push → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)）。
