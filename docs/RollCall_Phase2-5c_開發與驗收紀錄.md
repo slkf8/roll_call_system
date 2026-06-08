@@ -124,7 +124,8 @@
   - Formal-data policy：`OPAQUE_PROTECTED_FORMAL_DATA_ZONE`；formal-data contents inspected：`no`。
   - Cleanup variance：`TOOL_LIMITATION_TERMINAL_CTRL_C_KEYSTROKE`；`ACCEPTED_EXACT_SIGINT_TO_RECORDED_LISTENER_PID`。此為 cleanup tool limitation，不是產品缺陷。
   - Evidence archive：`~/Documents/RollCall_AcceptanceArchives/RC10_BuildPreflight_2026-06-08_l6H5Ty/`；詳見 [`RollCall_RC10_Release_BinarySmoke_Acceptance_2026-06-08.md`](RollCall_RC10_Release_BinarySmoke_Acceptance_2026-06-08.md)。
-  - Tag：`portable-release-candidate-10` 尚未建立、尚未 push；預計 target `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`。
+  - Tag：lightweight tag `portable-release-candidate-10` 已建立並單獨 push → `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`（local = remote，object type commit）。
+  - Docs：pre-tag docs commit `06d028af0b21427826eea259c103efa708a88540` 尚未 push 至 `origin/main`；post-tag docs update 尚未 commit。
 - **已完成（DataPage range stats + sticky header，2026-06-08）**：feature commit `a149ab7dbc51ae54053353670255eb714ad108a9` 新增 DataPage 老師服務月份範圍統計與主學生統計表 sticky header。
   - 行為：主卡維持單月統計；點擊開啟老師服務統計 Sheet；預設 Sep-Aug；範圍暫時調整且最多 12 個月；不寫 localStorage / global setting / DB。
   - 統計口徑：frontend sessions 聚合；present regular / makeup / extra 計入正常出席；教材服務 reasonCode 鏡像 backend 1..6。
@@ -133,9 +134,9 @@
   - Browser acceptance：Control Chrome isolated acceptance PASS with `TOOL_LIMITATION_NATIVE_MONTH_INPUT`；可可靠驗收主卡、Sheet 預設、空月份 validation、cancel / reopen reset、sticky desktop / narrow、dark mode；其餘 native month input 情境由 RTL 補充。
   - Runtime cleanup：isolated frontend `:5174` 與 backend `:18031` 已釋放；既有 `:5173` dev server 未操作。
   - Archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`；詳見 [`RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md`](RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md)。
-- **待辦**：RC10 docs stage gate、docs-only commit、RC10 lightweight tag 建立與單獨 push、tag post-push docs update；Windows 維修入口暫緩。
+- **待辦**：RC10 post-tag docs stage gate、docs-only local commit、integrated main pre-push gate、單次 `git push origin main`；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
   - `input[type=date]` 在 Codex in-app browser 有 native picker 自動化限制。
   - Control Chrome 對 native `input[type=month]` 的部分月份值自動化有限制；DataPage range stats 的產品行為由 browser 可驗收情境與 RTL 補充共同支持。
-- **建議下一步**：RC10 docs diff QA → 精準 stage → docs-only commit → 建立 lightweight tag `portable-release-candidate-10` → 單獨 push tag → tag post-push docs update → 再評估 Windows 維修入口。
+- **建議下一步**：post-tag docs diff QA → 精準 stage → docs-only local commit → integrated main pre-push gate → 單次 `git push origin main` → 再評估 Windows 維修入口。

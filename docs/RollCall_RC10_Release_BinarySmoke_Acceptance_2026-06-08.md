@@ -108,12 +108,21 @@ This variance is accepted as cleanup tooling limitation and is not treated as a 
 
 ## 11. Tag status
 
-- planned lightweight tag：`portable-release-candidate-10`
-- planned target：`a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`
-- current local tag state：尚未建立
-- current remote tag state：尚未 push
+- lightweight tag：`portable-release-candidate-10`
+- tag type：lightweight
+- object type：commit
+- local tag target：`a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`
+- remote tag target：`a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`
+- tag push state：已建立並單獨 push
 
-Tag must be created and pushed as a separate tag-only operation. Do not use `--tags` or mix with a main push.
+Tag was created and pushed as a separate tag-only operation. Main has not been pushed yet.
+
+Docs state:
+
+- pre-tag docs commit：`06d028af0b21427826eea259c103efa708a88540`
+- pre-tag docs commit：尚未 push 至 `origin/main`
+- post-tag docs update：尚未 commit
+- next step：post-tag docs stage gate → docs-only local commit → integrated main pre-push gate → 單次 `git push origin main`
 
 ## 12. Remaining out-of-scope work
 
@@ -124,4 +133,4 @@ Tag must be created and pushed as a separate tag-only operation. Do not use `--t
 
 `PASS_RC10_PACKAGED_BINARY_SMOKE_WITH_EXACT_SIGINT_CLEANUP_READY_FOR_DOCS_GATE`
 
-RC10 build、package、artifact identity、DB / lock exclusion、opaque formal-data policy、host-shell packaged binary smoke、accepted cleanup variance 與 evidence archive 均已補錄。RC10 tag `portable-release-candidate-10` 尚未建立、尚未 push。
+RC10 build、package、artifact identity、DB / lock exclusion、opaque formal-data policy、host-shell packaged binary smoke、accepted cleanup variance、evidence archive 與 tag status 均已補錄。RC10 tag `portable-release-candidate-10` 已建立並單獨 push；main 尚未 push。
