@@ -124,6 +124,15 @@ function formatDateISO(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
+function formatMonthDateInputValue(date: Date) {
+  return formatDateISO(new Date(date.getFullYear(), date.getMonth(), 1));
+}
+
+function normalizeDateInputToMonthStart(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  return `${value.slice(0, 7)}-01`;
+}
+
 function formatCompactTimeRange(start?: string, end?: string) {
   if (!start || !end) return "";
 
@@ -198,8 +207,7 @@ export default function MonthPage({
   setToast,
 }: MonthPageProps) {
   const isDark = useContext(ThemeContext) || false;
-
-  const monthDatePickerRef = useRef<HTMLInputElement>(null);
+  const monthPickerInputRef = useRef<HTMLInputElement>(null);
 
   // 供月曆顯示的月份錨點 (預設為 today 或是 selectedDate 的所在月份)
   const [viewDate, setViewDate] = useState(
@@ -370,25 +378,18 @@ const calculateDayConflicts = (
 };
 
   // --- Handlers ---
-  function openMonthDatePicker() {
-    const input = monthDatePickerRef.current as HTMLInputElement | null;
-    if (!input) return;
+  function handleMonthPickerChange(value: string) {
+    const nextDateISO = normalizeDateInputToMonthStart(value);
+    if (!nextDateISO) return;
 
-    const anyInput = input as any;
-    if (typeof anyInput.showPicker === "function") {
-      anyInput.showPicker();
-    } else {
-      input.click();
+    const picked = new Date(nextDateISO);
+    if (Number.isNaN(picked.getTime())) {
+      return;
     }
-  }
 
-  function handleMonthDateChange(value: string) {
-    if (!value) return;
-
-    const picked = new Date(value);
-    setSelectedDate(value);
+    setSelectedDate(nextDateISO);
     setViewDate(new Date(picked.getFullYear(), picked.getMonth(), 1));
-    setDrawerDate(value);
+    setDrawerDate(null);
     setActiveMenuId(null);
   }
 
@@ -1561,24 +1562,34 @@ const handleBatchClearHoliday = async () => {
                     <IconChevronLeft className="h-5 w-5" />
                   </button>
 
-                  <button
-                    onClick={openMonthDatePicker}
-                    className={`min-w-[90px] px-3 text-center text-[15px] font-bold tabular-nums active:opacity-50 transition-opacity ${
-                      isDark ? "text-white" : "text-gray-900"
-                    }`}
-                    aria-label="選擇月份日期"
-                  >
-                    {viewDate.getFullYear()}年{viewDate.getMonth() + 1}月
-                  </button>
-
-                  <input
-                    ref={monthDatePickerRef}
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => handleMonthDateChange(e.target.value)}
-                    className="absolute w-0 h-0 opacity-0 pointer-events-none -z-10"
-                    tabIndex={-1}
-                  />
+                  <div className="relative inline-flex min-h-11 min-w-[112px] items-center justify-center rounded-full px-4">
+                    <span
+                      aria-hidden="true"
+                      className={`text-center text-[15px] font-bold tabular-nums transition-opacity ${
+                        isDark ? "text-white" : "text-gray-900"
+                      }`}
+                    >
+                      {viewDate.getFullYear()}年{viewDate.getMonth() + 1}月
+                    </span>
+                    <input
+                      ref={monthPickerInputRef}
+                      type="date"
+                      value={formatMonthDateInputValue(viewDate)}
+                      onChange={(event) => handleMonthPickerChange(event.target.value)}
+                      onClick={() => {
+                        const input = monthPickerInputRef.current as any;
+                        if (input && typeof input.showPicker === "function") {
+                          try {
+                            input.showPicker();
+                          } catch {
+                            // showPicker can throw outside a user gesture; the direct tap still reaches the input.
+                          }
+                        }
+                      }}
+                      aria-label="選擇月份"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                  </div>
 
                   <button
                     onClick={() => changeMonth(1)}
@@ -2168,7 +2179,6 @@ const handleBatchClearHoliday = async () => {
       </div>
 
       {/* --- 全局 IOSSheets --- */}
-
       <IOSSheet
         open={drawerGlobalSheetOpen}
         title="設定當日事件"

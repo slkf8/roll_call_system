@@ -608,6 +608,97 @@ describe("DataPage", () => {
     expect(getValueNearLabel("本月課次總數").getByText("8")).toBeInTheDocument();
   });
 
+  it("renders a native date input overlay over the target month block", () => {
+    renderDataPage();
+
+    const input = screen.getByLabelText(/選擇目標月份，目前為 2026年11月/) as HTMLInputElement;
+    expect(input.type).toBe("date");
+    expect(input).toHaveValue("2026-11-15");
+
+    const block = input.parentElement;
+    expect(block).toHaveTextContent("目標月份");
+    expect(block).toHaveTextContent("2026年11月");
+    expect(block).toHaveTextContent("2026-11-01 至 2026-11-30");
+    expect(block?.querySelector("svg")).toBeInTheDocument();
+
+    const cls = input.getAttribute("class") ?? "";
+    expect(cls).toContain("absolute");
+    expect(cls).toContain("inset-0");
+    expect(cls).toContain("h-full");
+    expect(cls).toContain("w-full");
+    expect(cls).toContain("cursor-pointer");
+    expect(cls).toContain("opacity-0");
+    expect(cls).not.toContain("pointer-events-none");
+    expect(cls).not.toContain("w-0");
+    expect(cls).not.toContain("h-0");
+    expect(cls).not.toContain("-z-10");
+    expect(input.getAttribute("tabindex")).not.toBe("-1");
+    expect(screen.queryByText("選擇目標月份")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "完成" })).not.toBeInTheDocument();
+  });
+
+  it("updates the target month through the existing selectedDate data flow", async () => {
+    const sessions: Session[] = [
+      ...makeSessions(),
+      {
+        id: 40,
+        studentId: 2,
+        student: { id: 2, name: "李小欣" },
+        dateISO: "2026-02-03",
+        start: "10:00",
+        durationMin: 60,
+        status: "present",
+        kind: "regular",
+        materialsProvided: false,
+        materialsReasonCode: null,
+      },
+    ];
+    const { snapshot } = renderDataPage({ initialSessions: sessions });
+
+    fireEvent.change(screen.getByLabelText(/選擇目標月份/), {
+      target: { value: "2026-02-18" },
+    });
+
+    expect(snapshot.selectedDate).toBe("2026-02-01");
+    expect(screen.getByLabelText(/選擇目標月份，目前為 2026年2月/)).toHaveValue("2026-02-01");
+    expect(screen.getByText("2026年2月")).toBeInTheDocument();
+    expect(screen.getByText("2026-02-01 至 2026-02-28")).toBeInTheDocument();
+    expect(getValueNearLabel("本月課次總數").getByText("1")).toBeInTheDocument();
+    const section = getSectionByHeading("每學生出席次數");
+    expect(getRowByCell(section, "李小欣")).toHaveTextContent("1");
+    await waitFor(() => expect(fetchMonthlyStatistics).toHaveBeenCalledWith("2026-02"));
+  });
+
+  it("keeps month navigation buttons working", async () => {
+    const { user, snapshot } = renderDataPage();
+
+    await user.click(screen.getByRole("button", { name: /上一個月/ }));
+    expect(snapshot.selectedDate).toBe("2026-10-01");
+    expect(screen.getByLabelText(/選擇目標月份，目前為 2026年10月/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /下一個月/ }));
+    await user.click(screen.getByRole("button", { name: /下一個月/ }));
+    expect(snapshot.selectedDate).toBe("2026-12-01");
+    expect(screen.getByLabelText(/選擇目標月份，目前為 2026年12月/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "回到本月" }));
+    expect(snapshot.selectedDate).not.toBe("2026-12-01");
+  });
+
+  it("does not POST or write localStorage when changing the target month", async () => {
+    const store = installLocalStorage();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    renderDataPage();
+
+    fireEvent.change(screen.getByLabelText(/選擇目標月份/), {
+      target: { value: "2026-12-18" },
+    });
+
+    expect(store.size).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("opens the teacher-service range sheet from a clickable card with a chevron", async () => {
     const sessions: Session[] = [
       ...makeSessions(),

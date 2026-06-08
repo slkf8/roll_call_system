@@ -79,21 +79,24 @@ function builtSession(
   };
 }
 
-type Snapshot = { sessions: Session[]; toasts: string[] };
+type Snapshot = { selectedDate: string; sessions: Session[]; toasts: string[] };
 
 function MonthHarness({
   initialStudents = makeStudents(),
   initialRules = makeRules(),
   initialSessions = [],
+  initialSelectedDate = SELECTED_DATE,
   isSessionsBackendAvailable = false,
   onSnapshot,
 }: {
   initialStudents?: StudentProfile[];
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
+  initialSelectedDate?: string;
   isSessionsBackendAvailable?: boolean;
   onSnapshot: (snapshot: Snapshot) => void;
 }) {
+  const [selectedDate, setSelectedDate] = React.useState(initialSelectedDate);
   const [sessions, setSessions] = React.useState<Session[]>(initialSessions);
   const [globalEvents, setGlobalEvents] = React.useState<GlobalEvent[]>([]);
   const [toasts, setToasts] = React.useState<string[]>([]);
@@ -107,14 +110,14 @@ function MonthHarness({
   };
 
   React.useEffect(() => {
-    onSnapshot({ sessions, toasts });
-  }, [sessions, toasts, onSnapshot]);
+    onSnapshot({ selectedDate, sessions, toasts });
+  }, [selectedDate, sessions, toasts, onSnapshot]);
 
   return (
     <MonthPage
       setTheme={vi.fn()}
-      selectedDate={SELECTED_DATE}
-      setSelectedDate={vi.fn()}
+      selectedDate={selectedDate}
+      setSelectedDate={setSelectedDate}
       students={initialStudents}
       studentScheduleRules={initialRules}
       sessions={sessions}
@@ -132,9 +135,10 @@ function renderMonthPage(options: {
   initialStudents?: StudentProfile[];
   initialRules?: StudentScheduleRule[];
   initialSessions?: Session[];
+  initialSelectedDate?: string;
   isSessionsBackendAvailable?: boolean;
 } = {}) {
-  let snapshot: Snapshot = { sessions: [], toasts: [] };
+  let snapshot: Snapshot = { selectedDate: SELECTED_DATE, sessions: [], toasts: [] };
   const user = userEvent.setup();
   render(
     <MonthHarness
@@ -152,6 +156,55 @@ function renderMonthPage(options: {
   };
 }
 
+describe("MonthPage header month picker", () => {
+  it("renders a tappable native date input overlay for the central month", () => {
+    renderMonthPage();
+
+    expect(screen.getByText("2026年4月")).toBeInTheDocument();
+    const input = screen.getByLabelText("選擇月份") as HTMLInputElement;
+    expect(input.type).toBe("date");
+    expect(input).toHaveValue("2026-04-01");
+
+    const cls = input.getAttribute("class") ?? "";
+    expect(cls).toContain("absolute");
+    expect(cls).toContain("inset-0");
+    expect(cls).toContain("h-full");
+    expect(cls).toContain("w-full");
+    expect(cls).toContain("cursor-pointer");
+    expect(cls).toContain("opacity-0");
+    expect(cls).not.toContain("pointer-events-none");
+    expect(cls).not.toContain("w-0");
+    expect(cls).not.toContain("h-0");
+    expect(cls).not.toContain("-z-10");
+    expect(input.getAttribute("tabindex")).not.toBe("-1");
+    expect(screen.queryByRole("button", { name: "完成" })).not.toBeInTheDocument();
+    expect(screen.queryByText("請選擇有效月份")).not.toBeInTheDocument();
+  });
+
+  it("updates the displayed month and selectedDate when the native input changes", () => {
+    const { snapshot } = renderMonthPage();
+
+    fireEvent.change(screen.getByLabelText("選擇月份"), { target: { value: "2026-06-18" } });
+
+    expect(snapshot.selectedDate).toBe("2026-06-01");
+    expect(screen.getByText("2026年6月")).toBeInTheDocument();
+    expect(screen.getByLabelText("選擇月份")).toHaveValue("2026-06-01");
+  });
+
+  it("keeps the previous and next month arrows working", async () => {
+    const { user } = renderMonthPage();
+
+    await user.click(screen.getByRole("button", { name: "上一個月" }));
+    expect(screen.getByText("2026年3月")).toBeInTheDocument();
+    expect(screen.getByLabelText("選擇月份")).toHaveValue("2026-03-01");
+
+    await user.click(screen.getByRole("button", { name: "下一個月" }));
+    await user.click(screen.getByRole("button", { name: "下一個月" }));
+    expect(screen.getByText("2026年5月")).toBeInTheDocument();
+    expect(screen.getByLabelText("選擇月份")).toHaveValue("2026-05-01");
+  });
+});
+
 async function openBatchMenu(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "批量操作" }));
 }
@@ -161,12 +214,11 @@ async function openBatchGenerateSheet(user: ReturnType<typeof userEvent.setup>) 
   await user.click(screen.getByRole("button", { name: "批量生成固定課次" }));
 }
 
-// The month header has a hidden `input[type=date]` month picker; exclude it so
-// indices map to the batch generate sheet's visible from/to inputs.
+// Return the date inputs inside the batch generate sheet.
 function sheetDateInputs() {
-  return Array.from(
-    document.querySelectorAll<HTMLInputElement>('input[type="date"]')
-  ).filter((input) => !input.className.includes("opacity-0"));
+  return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="date"]')).filter(
+    (input) => input.getAttribute("aria-label") !== "選擇月份"
+  );
 }
 
 function uniqueRegularKeys(sessions: Session[]) {
@@ -231,8 +283,7 @@ describe("MonthPage 批量生成 Sheet 預設錨點 (viewDate)", () => {
   it("defaults the range and chip year to the viewDate month", async () => {
     const { user } = renderMonthPage();
     await openBatchGenerateSheet(user);
-    expect(screen.getByDisplayValue("2026-04-01")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("2026-04-30")).toBeInTheDocument();
+    expect(sheetDateInputs().map((input) => input.value)).toEqual(["2026-04-01", "2026-04-30"]);
     expect(screen.getByText("2026 年")).toBeInTheDocument();
   });
 
@@ -241,8 +292,7 @@ describe("MonthPage 批量生成 Sheet 預設錨點 (viewDate)", () => {
     // selectedDate stays 2026-04-20, but advance the displayed month to May.
     await user.click(screen.getByRole("button", { name: "下一個月" }));
     await openBatchGenerateSheet(user);
-    expect(screen.getByDisplayValue("2026-05-01")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("2026-05-31")).toBeInTheDocument();
+    expect(sheetDateInputs().map((input) => input.value)).toEqual(["2026-05-01", "2026-05-31"]);
   });
 });
 

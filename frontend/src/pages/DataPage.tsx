@@ -767,6 +767,7 @@ export default function DataPage({
 }: DataPageProps) {
   const isDark = useContext(ThemeContext);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const targetMonthInputRef = useRef<HTMLInputElement>(null);
 
   const [templateFileName, setTemplateFileName] = useState("");
   const [templateArrayBuffer, setTemplateArrayBuffer] = useState<ArrayBuffer | null>(null);
@@ -1025,6 +1026,11 @@ export default function DataPage({
   function closeServiceStatsSheetIfValid() {
     if (!rangeValidation.isValid) return;
     setServiceStatsSheetOpen(false);
+  }
+
+  function handleTargetMonthChange(value: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    setSelectedDate(`${value.slice(0, 7)}-01`);
   }
 
   function openSchoolYearSheet() {
@@ -1489,14 +1495,43 @@ export default function DataPage({
           <section className={cardClass}>
             <div className="p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className={`text-[13px] font-medium ${mutedTextClass}`}>目標月份</div>
-                  <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em]">
-                    {monthLabel}
+                <div
+                  className={`relative min-h-24 rounded-[20px] px-3 py-2 text-left transition active:scale-[0.99] focus-within:outline-none focus-within:ring-2 ${
+                    isDark
+                      ? "hover:bg-white/5 focus-within:ring-white/20"
+                      : "hover:bg-[#F2F2F7] focus-within:ring-[#C7DAFF]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className={`text-[13px] font-medium ${mutedTextClass}`}>目標月份</div>
+                      <div className="mt-1 text-[28px] font-extrabold tracking-[-0.03em]">
+                        {monthLabel}
+                      </div>
+                      <div className={`mt-1 text-[13px] ${mutedTextClass}`}>
+                        {monthRange.monthStartISO} 至 {monthRange.monthEndISO}
+                      </div>
+                    </div>
+                    <IconChevronRight className={`h-4 w-4 shrink-0 ${mutedTextClass}`} />
                   </div>
-                  <div className={`mt-1 text-[13px] ${mutedTextClass}`}>
-                    {monthRange.monthStartISO} 至 {monthRange.monthEndISO}
-                  </div>
+                  <input
+                    ref={targetMonthInputRef}
+                    type="date"
+                    value={selectedDate}
+                    onChange={(event) => handleTargetMonthChange(event.target.value)}
+                    onClick={() => {
+                      const input = targetMonthInputRef.current as any;
+                      if (input && typeof input.showPicker === "function") {
+                        try {
+                          input.showPicker();
+                        } catch {
+                          // showPicker can throw outside a user gesture; the direct tap still reaches the input.
+                        }
+                      }
+                    }}
+                    aria-label={`選擇目標月份，目前為 ${monthLabel}`}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
                 </div>
 
                 <div className="flex flex-wrap gap-2">
