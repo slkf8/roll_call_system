@@ -75,6 +75,20 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 
 詳見 [`RollCall_Phase2-5c_開發與驗收紀錄.md`](RollCall_Phase2-5c_開發與驗收紀錄.md)。
 
+## 5a. DataPage 老師服務月份範圍統計 + Sticky Header
+
+- **feature commit**：`a149ab7dbc51ae54053353670255eb714ad108a9`（本機 safety commit，尚未 push）。
+- **狀態**：isolated browser acceptance PASS with `TOOL_LIMITATION_NATIVE_MONTH_INPUT`。
+- **專屬驗收文件**：[`RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md`](RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md)。
+- **permanent archive**：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`。
+- **目前行為**：
+  - DataPage「老師服務總次數」主卡保留目前月份統計，點擊後開啟月份範圍統計 Sheet。
+  - Sheet 預設 Sep-Aug，可暫時調整月份範圍，inclusive month count 最多 12 個月。
+  - 範圍設定只存在 component state，不永久保存、不寫 localStorage / global setting / DB。
+  - 跨月份統計由 frontend 已載入 sessions 聚合；教材 reasonCode 口徑鏡像 backend 1..6。
+  - 主學生統計表 header 使用 sticky top-0 z-10，保持自然頁面捲動，窄畫面無整頁水平溢出。
+- **仍 out-of-scope**：原因 6 手動調整、正式 academic-year model、永久保存月份範圍、backend API、DB schema、Excel export、Windows 維修入口。
+
 ## 6. 批量生成固定課次目前行為
 
 - 入口集中於 `MonthPage`「批量操作」→「批量生成固定課次」；`StudentsPage` 已**移除**該入口。

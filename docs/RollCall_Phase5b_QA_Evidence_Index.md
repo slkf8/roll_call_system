@@ -103,6 +103,28 @@ seed 概要（月份 2026-06，全為 synthetic 假名）：
 
 涵蓋 stale-state（A）與 offline-first reload（B）兩種情境的入口阻擋與 Toast。
 
+## 7a. DataPage Range Stats + Sticky Header Acceptance
+
+permanent archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`
+
+| 路徑 | 用途 |
+|---|---|
+| `acceptance_summary.md` | DataPage range stats + sticky header 驗收摘要 |
+| `SHA256SUMS.txt` / `archive_files.txt` | permanent archive inventory 與 hash |
+| `evidence/S4-01-card-monthly.png` | 主卡單月統計、可點擊、chevron |
+| `evidence/S4-02-sheet-default.png` | Sheet 預設 Sep-Aug 與累積統計 |
+| `evidence/S4-03-range-january-only.png` | January-only 情境 evidence（native month input 由 RTL 補充） |
+| `evidence/S4-04-range-without-january.png` | 排除 January 情境 evidence（native month input 由 RTL 補充） |
+| `evidence/S4-07-invalid-empty-month.png` | 空月份 inline error、統計區塊隱藏、完成阻擋 |
+| `evidence/S4-08-reopen-default.png` | 取消後重開恢復預設範圍 |
+| `evidence/S4-09-sticky-desktop.png` | desktop sticky header |
+| `evidence/S4-10-sticky-narrow.png` | narrow viewport sticky header 與無水平溢出 |
+| `evidence/S4-11-dark-mode.png` | dark mode Sheet / sticky header 可讀 |
+| `logs/backend.foreground.listener.pid` / `logs/frontend.foreground.listener.pid` | isolated runtime listener PID evidence |
+| `logs/backend.log` / `logs/backend.retry.log` | backend runtime / retry log（已通過敏感字串掃描） |
+
+結論：feature commit `a149ab7dbc51ae54053353670255eb714ad108a9` 的 DataPage 老師服務月份範圍統計、validation、reset、sticky header、narrow viewport 與 dark mode acceptance 已完成；狀態為 `PASS_DATAPAGE_RANGE_STATS_ISOLATED_BROWSER_ACCEPTANCE_WITH_TOOL_LIMITATION_READY_FOR_DOCS_GATE`，工具限制為 `TOOL_LIMITATION_NATIVE_MONTH_INPUT`。
+
 ## 8. Evidence 保留規則
 
 - 不得自動清理 evidence（`/private/tmp/RollCall_Phase5b_UI_Acceptance.WIa9V3/` 及兩個 screenshots 目錄）。

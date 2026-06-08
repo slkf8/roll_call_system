@@ -119,8 +119,17 @@
 - **已完成**：Phase 2-5c 功能鏈、自動化 + 人工 + backend-unavailable + stop/restart 驗收、單一 push 與封存；**DataPage 正式模板 UI / fallback manual acceptance（2026-06-07 PASS）** — backend-primary export、missing-column UI gate、browser local fallback、fallback toast 全部 PASS，backend-primary vs fallback 語義 diff 0 business differences，durable archive 已建立並驗證（詳見 [`RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md`](RollCall_DataPage_OfficialTemplateExport_Acceptance_2026-06-07.md)）。
 - **已完成（RC9，2026-06-07）**：RC9 clean binary build、portable package、artifact SHA 封存、packaged binary 隔離 smoke 全部 PASS。RC9 artifact `release/RollCall_Portable_macOS_RC9.zip`，SHA256 `4e965900d80c895f4f561c837b61d491f7362c1ea8c3c09d3d1d0271e4381691`（詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)）。
 - **已完成（RC9 tag）**：lightweight tag `portable-release-candidate-9` 已建立並單獨 push → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit）。
+- **已完成（DataPage range stats + sticky header，2026-06-08）**：feature commit `a149ab7dbc51ae54053353670255eb714ad108a9` 新增 DataPage 老師服務月份範圍統計與主學生統計表 sticky header。
+  - 行為：主卡維持單月統計；點擊開啟老師服務統計 Sheet；預設 Sep-Aug；範圍暫時調整且最多 12 個月；不寫 localStorage / global setting / DB。
+  - 統計口徑：frontend sessions 聚合；present regular / makeup / extra 計入正常出席；教材服務 reasonCode 鏡像 backend 1..6。
+  - Sticky：主學生表格 header sticky top-0 z-10；保持自然 page scroll；窄畫面無整頁水平溢出。
+  - 測試：targeted frontend tests PASS（3 files / 82 tests）、full frontend tests PASS（18 files / 358 tests）、frontend build PASS（僅 Vite chunk-size warning，non-blocking）。
+  - Browser acceptance：Control Chrome isolated acceptance PASS with `TOOL_LIMITATION_NATIVE_MONTH_INPUT`；可可靠驗收主卡、Sheet 預設、空月份 validation、cancel / reopen reset、sticky desktop / narrow、dark mode；其餘 native month input 情境由 RTL 補充。
+  - Runtime cleanup：isolated frontend `:5174` 與 backend `:18031` 已釋放；既有 `:5173` dev server 未操作。
+  - Archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`；詳見 [`RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md`](RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md)。
 - **待辦**：本輪 RC9 docs commits 尚未 push 至 `origin/main`；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
   - `input[type=date]` 在 Codex in-app browser 有 native picker 自動化限制。
+  - Control Chrome 對 native `input[type=month]` 的部分月份值自動化有限制；DataPage range stats 的產品行為由 browser 可驗收情境與 RTL 補充共同支持。
 - **建議下一步**：RC9 tag 已建立並單獨 push → 完成 RC9 tag post-push docs 狀態更新 → docs-only diff QA → 第二個本機 docs-only commit → 集中 push `main` 上的 RC9 docs commits（需明確批准）→ 再評估 Windows 維修入口。
