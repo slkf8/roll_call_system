@@ -32,7 +32,12 @@
 |---|---|
 | local main / origin/main tracking / remote main | `0118d0c139cdf3dee56d48c3e6b060d3cada7a9c`（三者一致） |
 | Git worktree | clean |
-| RC baseline | **RC8**（仍為現行 release baseline） |
+| RC baseline | **RC10 pre-tag**（package + host-shell binary smoke 已完成；tag 尚未建立 / 尚未 push） |
+| RC10 source baseline | `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d` |
+| RC10 tag | `portable-release-candidate-10` **尚未建立、尚未 push**；預計 target `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d` |
+| RC10 artifact | `release/RollCall_Portable_macOS_RC10.zip` |
+| RC10 artifact SHA-256 | `e2c0fd84f6b3ddbb24c68dd932885e14894eefd400605d90fc3c015d008366c4`（MD5 `df79d74cd2a1bb2b25d621c2d3ae9288`、size 21222640；詳見 [`RollCall_RC10_Release_BinarySmoke_Acceptance_2026-06-08.md`](RollCall_RC10_Release_BinarySmoke_Acceptance_2026-06-08.md)） |
+| RC10 package / binary smoke | **PASS**：build / package / DB-lock exclusion / host-shell packaged binary smoke 已完成；formal-data policy `OPAQUE_PROTECTED_FORMAL_DATA_ZONE`，formal-data contents inspected `no` |
 | RC9 tag | **已建立並單獨 push**：lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit） |
 | 重新 package / binary | **RC9 package + binary smoke 已完成 PASS（2026-06-07）** |
 | RC9 artifact | `release/RollCall_Portable_macOS_RC9.zip` |
@@ -77,7 +82,7 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 
 ## 5a. DataPage 老師服務月份範圍統計 + Sticky Header
 
-- **feature commit**：`a149ab7dbc51ae54053353670255eb714ad108a9`（本機 safety commit，尚未 push）。
+- **feature commit**：`a149ab7dbc51ae54053353670255eb714ad108a9`（已包含於 `origin/main`，並納入 RC10 source baseline）。
 - **狀態**：isolated browser acceptance PASS with `TOOL_LIMITATION_NATIVE_MONTH_INPUT`。
 - **專屬驗收文件**：[`RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md`](RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md)。
 - **permanent archive**：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`。
@@ -140,6 +145,15 @@ d7005d0 refactor(sessions): extract regular session generation helpers
   - 詳見 [`RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md`](RollCall_RC9_Release_BinarySmoke_Acceptance_2026-06-07.md)
   - `portable-release-candidate-9` lightweight tag **已建立並單獨 push** → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543`（local = remote，object type commit）。
   - **仍 pending**：第一個 RC9 docs commit `35ef02c123acafdd083dfe722befdf9e0054866b` 已於本機建立；本輪 tag post-push 文件狀態更新尚未 commit；RC9 docs commits **尚未 push 至 `origin/main`**。
+- **RC10 package / host-shell packaged binary smoke 已完成 PASS（2026-06-08，pre-tag）**。
+  - source baseline：`a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`
+  - RC10 artifact：`release/RollCall_Portable_macOS_RC10.zip`（size 21222640，SHA256 `e2c0fd84f6b3ddbb24c68dd932885e14894eefd400605d90fc3c015d008366c4`，MD5 `df79d74cd2a1bb2b25d621c2d3ae9288`）
+  - build binary：size 9600880，SHA256 `2b93868b5685e29bbc590c5eeafe5e5b87c34eceb7d13ed3f4f3970a46fd8df2`，MD5 `b926d8b44dd31d946a772bdcbcc67a5d`
+  - package：PASS；DB / lock exclusion：PASS；host-shell smoke：PASS（health、root HTML、GET-only API、runtime isolation、port release）
+  - formal-data policy：`OPAQUE_PROTECTED_FORMAL_DATA_ZONE`；formal-data contents inspected：`no`
+  - cleanup：`TOOL_LIMITATION_TERMINAL_CTRL_C_KEYSTROKE` 已接受為工具限制；`ACCEPTED_EXACT_SIGINT_TO_RECORDED_LISTENER_PID`
+  - evidence archive：`~/Documents/RollCall_AcceptanceArchives/RC10_BuildPreflight_2026-06-08_l6H5Ty/`
+  - `portable-release-candidate-10` lightweight tag **尚未建立、尚未 push**；預計 target `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`
 - Windows 維修入口暫未處理（`maintenance_restore.bat`、`scripts/package_release.ps1` 整合、Windows portable package、Windows 實機 lock 驗收）。
 
 ## 11. 後續工作流規則
@@ -154,7 +168,6 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 ## 12. 下一個建議 Phase
 
 1. ~~完成 DataPage 正式模板 UI / fallback 的人工驗收並補文件~~ → 已完成（PASS，docs 已封存並 push 至 `origin/main`）。
-2. ~~評估是否建立 RC9（含新 package、binary smoke、artifact SHA 封存）~~ → RC9 package / binary smoke / artifact SHA **已完成 PASS**；lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543` **已建立並單獨 push**。後續工作：
-   - 完成 RC9 tag post-push docs diff QA → 精準 stage → 建立第二個本機 docs-only commit
-   - 集中 push `main` 上的 RC9 docs commits（需使用者明確批准）
-3. 之後再評估 Windows 維修入口整合。
+2. ~~評估是否建立 RC9（含新 package、binary smoke、artifact SHA 封存）~~ → RC9 package / binary smoke / artifact SHA **已完成 PASS**；lightweight tag `portable-release-candidate-9` → `cca9498fef8d0ffaaa44ab4e506ab8202fda8543` **已建立並單獨 push**。
+3. RC10 package / host-shell packaged binary smoke 已完成；下一步為 RC10 docs stage gate → docs-only commit → 建立 lightweight tag `portable-release-candidate-10`（預計 target `a3af39bb69ffc8137ec32f8edbfc6bdb248fa30d`）→ 單獨 push tag → docs post-tag update。
+4. 之後再評估 Windows 維修入口整合。
