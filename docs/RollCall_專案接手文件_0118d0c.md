@@ -97,7 +97,9 @@ d7005d0 refactor(sessions): extract regular session generation helpers
 ## 5b. RC11 月份選擇互動修正（iPad-compatible native date overlay）
 
 - **feature commit**：`14146b022a1ae1e3ec8142e1ad5c684708790e1d`（`fix(month-picker): use iPad-compatible native date overlays`）。
-- **Git 狀態**：local only；**尚未 push 至 `origin/main`**；**RC11 release candidate tag 尚未建立**。
+- **Git 狀態**：RC11 source feature commits **已 push 至 `origin/main`**（main HEAD `38846dc67591494d3a00ee9cfc45f7da0a181b51`，含 docs acceptance commit）；RC11 portable package 與 named artifact **已建立**並通過 isolated packaged binary smoke；**RC11 release candidate tag 尚未建立**。
+- **RC11 release artifact**：`release/RollCall_Portable_macOS_RC11.zip`（size `21222989`，SHA256 `5aceca9e173cd5a483c390d979fb840e5ea6e473ed9034942d1f120dda483300`，MD5 `b2409b2bd11538d6ee0e6a5c7c5a08cf`；generic / named BYTE-IDENTICAL；DB / lock exclusion PASS）。詳見 [`RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md`](RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md)。
+- **RC11 release out-of-scope**：Windows portable / 維修入口 / 實機 lock 驗收、RC11 tag 建立與 push、post-tag docs、main docs push。
 - **行為**：
   - MonthPage 中央月份改為 TodayPage-style transparent native `input[type=date]` overlay；tap 直接命中 native input；`showPicker()` 只作 desktop enhancement；選擇後正規化為 `YYYY-MM-01`；左右箭頭保留。
   - DataPage 目標月份資訊區使用相同 transparent native overlay；選擇後正規化為月初；日期範圍 / 統計 / 學生表 / Excel export 資料流保留；上一個月 / 回到本月 / 下一個月保留。

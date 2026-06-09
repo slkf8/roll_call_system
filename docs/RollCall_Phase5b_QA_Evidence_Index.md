@@ -138,7 +138,20 @@ permanent archive：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iP
 | `RC11-03-dark-mode.png` | dark mode evidence |
 | `RC11-iPad-manual-acceptance.txt` | iPad 人工驗收紀錄 |
 
-結論：feature commit `14146b022a1ae1e3ec8142e1ad5c684708790e1d` 將 MonthPage 中央月份與 DataPage 目標月份資訊區改為 TodayPage-style transparent native `input[type=date]` overlay；MonthPage targeted 3 files / 74 tests、DataPage targeted 1 file / 60 tests、full frontend regression 18 files / 365 tests、frontend build 全部 PASS；狀態為 `PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE` 與 `PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`，工具限制為 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP` 與 `TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。archive 已通過 forbidden-file existence scan 與 privacy scan、SHA256 verification PASS。Git 狀態：feature commit local only，尚未 push 至 `origin/main`，RC11 release candidate tag 尚未建立。詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
+結論：feature commit `14146b022a1ae1e3ec8142e1ad5c684708790e1d` 將 MonthPage 中央月份與 DataPage 目標月份資訊區改為 TodayPage-style transparent native `input[type=date]` overlay；MonthPage targeted 3 files / 74 tests、DataPage targeted 1 file / 60 tests、full frontend regression 18 files / 365 tests、frontend build 全部 PASS；狀態為 `PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE` 與 `PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`，工具限制為 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP` 與 `TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。archive 已通過 forbidden-file existence scan 與 privacy scan、SHA256 verification PASS。Git 狀態：RC11 source feature commits 已 push 至 `origin/main`（main HEAD `38846dc67591494d3a00ee9cfc45f7da0a181b51`），RC11 release candidate tag 尚未建立。詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
+
+## 7c. RC11 Portable Release Binary Smoke
+
+evidence archive：`~/Documents/RollCall_AcceptanceArchives/RC11_BuildPreflight_2026-06-09_15dcbf/`
+
+| 類別 | evidence |
+|---|---|
+| RC11-1 build | protected baseline、runtime baseline、build log / result、binary hashes、post-build gate |
+| RC11-2 package | pre-package generic inventory / hashes、quarantine inventory、package log / result、generic inventory、named zip inventory、package hashes、DB / lock exclusion scan、post-package gate |
+| RC11-3 smoke preflight | preflight gate、named zip inventory / hashes、DB / lock scan、launcher review、GET plan、lane plan、cleanup plan、post-preflight gate |
+| RC11-3 smoke result | smoke result、runtime state、HTTP results、cleanup result、post-smoke gate |
+
+摘要：source baseline `38846dc67591494d3a00ee9cfc45f7da0a181b51`；artifact `release/RollCall_Portable_macOS_RC11.zip`，SHA256 `5aceca9e173cd5a483c390d979fb840e5ea6e473ed9034942d1f120dda483300`（generic / named BYTE-IDENTICAL，DB / lock exclusion PASS）；isolated packaged binary smoke 狀態 `PASS_RC11_ISOLATED_PACKAGED_SMOKE_READY_FOR_RELEASE_DOCS`（GET-only API 全 HTTP 200、write API 未執行、精準 PID cleanup、`:8211` 已釋放、`:5173`/`:8000` 未操作）；formal-data policy `OPAQUE_PROTECTED_FORMAL_DATA_ZONE`、`formal_data_contents_inspected=no`；RC11 tag 尚未建立。evidence archive 未複製 synthetic runtime database、runtime lock 或 raw runtime log。詳見 [`RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md`](RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md)。
 
 ## 8. Evidence 保留規則
 

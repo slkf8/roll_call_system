@@ -139,8 +139,18 @@
   - 根因：舊 MonthPage 路徑依賴 `0 × 0` hidden input、`pointer-events-none`、負 `z-index` 與 programmatic picker-only 觸發，在 iPad 上不可靠。
   - 測試：MonthPage targeted 3 files / 74 tests PASS；DataPage targeted 1 file / 60 tests PASS；full frontend regression 18 files / 365 tests PASS；frontend build PASS。
   - 驗收：Control Chrome desktop overlay acceptance PASS；`PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE`、`PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`；工具限制 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP`、`TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。
-  - Git 狀態：local only；**尚未 push 至 `origin/main`**；**RC11 release candidate tag 尚未建立**。
+  - Git 狀態：RC11 source feature commits **已 push 至 `origin/main`**（main HEAD `38846dc67591494d3a00ee9cfc45f7da0a181b51`）；**RC11 release candidate tag 尚未建立**。
   - Archive：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iPadAcceptance_2026-06-08_MM46np/`；詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
+- **已完成（RC11 portable release build / package / packaged smoke，2026-06-09）**：source baseline `38846dc67591494d3a00ee9cfc45f7da0a181b51`。
+  - clean build：PASS（`build_binary.sh` exit 0；binary `backend/dist/roll_call_backend/roll_call_backend`）。
+  - package：PASS（quarantine RC10 遺留 generic zip 後單次 `package_release.sh --zip`）。
+  - artifact：`release/RollCall_Portable_macOS_RC11.zip`，size `21222989`、SHA256 `5aceca9e173cd5a483c390d979fb840e5ea6e473ed9034942d1f120dda483300`、MD5 `b2409b2bd11538d6ee0e6a5c7c5a08cf`；generic / named **BYTE-IDENTICAL**；DB / lock exclusion **PASS**。
+  - isolated packaged smoke：**PASS**（`DIRECT_PACKAGED_BINARY_BACKGROUND_WITH_EXACT_PID_CLEANUP`；非 launcher；port 8211；runtime data 強制寫入 throwaway runtime dir）。
+  - GET-only API：`/health`、`/`、`/api/students`、`/api/sessions`、`/api/global-events`、`/api/statistics/monthly?month=2026-01` 全 HTTP 200；**write API 未執行**。
+  - cleanup：精準 listener PID SIGTERM、graceful shutdown；`:8211` 已釋放；`:5173` / `:8000` 既有 listener 未操作。
+  - formal-data policy：`OPAQUE_PROTECTED_FORMAL_DATA_ZONE`；`formal_data_contents_inspected=no`。
+  - RC10 artifact 與 tag 未變；**RC11 tag 尚未建立**。
+  - Evidence：`~/Documents/RollCall_AcceptanceArchives/RC11_BuildPreflight_2026-06-09_15dcbf/`；詳見 [`RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md`](RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md)。
 - **待辦**：RC10 post-tag docs stage gate、docs-only local commit、integrated main pre-push gate、單次 `git push origin main`；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
