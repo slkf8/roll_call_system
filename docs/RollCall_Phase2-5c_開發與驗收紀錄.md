@@ -139,7 +139,7 @@
   - 根因：舊 MonthPage 路徑依賴 `0 × 0` hidden input、`pointer-events-none`、負 `z-index` 與 programmatic picker-only 觸發，在 iPad 上不可靠。
   - 測試：MonthPage targeted 3 files / 74 tests PASS；DataPage targeted 1 file / 60 tests PASS；full frontend regression 18 files / 365 tests PASS；frontend build PASS。
   - 驗收：Control Chrome desktop overlay acceptance PASS；`PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE`、`PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`；工具限制 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP`、`TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。
-  - Git 狀態：RC11 source feature commits **已 push 至 `origin/main`**（main HEAD `38846dc67591494d3a00ee9cfc45f7da0a181b51`）；**RC11 release candidate tag 尚未建立**。
+  - Git 狀態：RC11 source feature commits **已 push 至 `origin/main`**（main HEAD `38846dc67591494d3a00ee9cfc45f7da0a181b51`）；**RC11 lightweight tag `portable-release-candidate-11` 已建立並單獨 push** → `38846dc67591494d3a00ee9cfc45f7da0a181b51`（詳見本紀錄 RC11 portable release 條目與 [`RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md`](RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md)）。
   - Archive：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iPadAcceptance_2026-06-08_MM46np/`；詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
 - **已完成（RC11 portable release build / package / packaged smoke，2026-06-09）**：source baseline `38846dc67591494d3a00ee9cfc45f7da0a181b51`。
   - clean build：PASS（`build_binary.sh` exit 0；binary `backend/dist/roll_call_backend/roll_call_backend`）。
@@ -149,7 +149,9 @@
   - GET-only API：`/health`、`/`、`/api/students`、`/api/sessions`、`/api/global-events`、`/api/statistics/monthly?month=2026-01` 全 HTTP 200；**write API 未執行**。
   - cleanup：精準 listener PID SIGTERM、graceful shutdown；`:8211` 已釋放；`:5173` / `:8000` 既有 listener 未操作。
   - formal-data policy：`OPAQUE_PROTECTED_FORMAL_DATA_ZONE`；`formal_data_contents_inspected=no`。
-  - RC10 artifact 與 tag 未變；**RC11 tag 尚未建立**。
+  - RC10 artifact 與 tag 未變。
+  - tag：RC11 lightweight tag `portable-release-candidate-11` **已建立並單獨 push** → source baseline `38846dc67591494d3a00ee9cfc45f7da0a181b51`（object type commit；local = remote；**非** pre-tag docs commit `d533329036c53bfa06f9b997a63f6cee80efaac5`）；tag result evidence `phase_rc11_4_tag_result.txt`。
+  - main 狀態：pre-tag docs commit `d533329036c53bfa06f9b997a63f6cee80efaac5` 尚未 push 至 `origin/main`；post-tag docs update 尚未 commit；main push 尚未執行。
   - Evidence：`~/Documents/RollCall_AcceptanceArchives/RC11_BuildPreflight_2026-06-09_15dcbf/`；詳見 [`RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md`](RollCall_RC11_Release_BinarySmoke_Acceptance_2026-06-09.md)。
 - **待辦**：RC10 post-tag docs stage gate、docs-only local commit、integrated main pre-push gate、單次 `git push origin main`；Windows 維修入口暫緩。
 - **已知限制**：
