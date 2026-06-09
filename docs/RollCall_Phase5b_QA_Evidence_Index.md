@@ -125,6 +125,21 @@ permanent archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStats
 
 結論：feature commit `a149ab7dbc51ae54053353670255eb714ad108a9` 的 DataPage 老師服務月份範圍統計、validation、reset、sticky header、narrow viewport 與 dark mode acceptance 已完成；狀態為 `PASS_DATAPAGE_RANGE_STATS_ISOLATED_BROWSER_ACCEPTANCE_WITH_TOOL_LIMITATION_READY_FOR_DOCS_GATE`，工具限制為 `TOOL_LIMITATION_NATIVE_MONTH_INPUT`。
 
+## 7b. RC11 Month Picker iPad Acceptance
+
+permanent archive：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iPadAcceptance_2026-06-08_MM46np/`
+
+| 路徑 | 用途 |
+|---|---|
+| `acceptance_summary.md` | RC11 月份選擇互動修正驗收摘要 |
+| `SHA256SUMS.txt` / `archive_files.txt` | permanent archive inventory 與 hash |
+| `RC11-01-monthpage-desktop-overlay.png` | MonthPage desktop overlay evidence |
+| `RC11-02-datapage-desktop-overlay.png` | DataPage desktop overlay evidence |
+| `RC11-03-dark-mode.png` | dark mode evidence |
+| `RC11-iPad-manual-acceptance.txt` | iPad 人工驗收紀錄 |
+
+結論：feature commit `14146b022a1ae1e3ec8142e1ad5c684708790e1d` 將 MonthPage 中央月份與 DataPage 目標月份資訊區改為 TodayPage-style transparent native `input[type=date]` overlay；MonthPage targeted 3 files / 74 tests、DataPage targeted 1 file / 60 tests、full frontend regression 18 files / 365 tests、frontend build 全部 PASS；狀態為 `PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE` 與 `PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`，工具限制為 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP` 與 `TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。archive 已通過 forbidden-file existence scan 與 privacy scan、SHA256 verification PASS。Git 狀態：feature commit local only，尚未 push 至 `origin/main`，RC11 release candidate tag 尚未建立。詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
+
 ## 8. Evidence 保留規則
 
 - 不得自動清理 evidence（`/private/tmp/RollCall_Phase5b_UI_Acceptance.WIa9V3/` 及兩個 screenshots 目錄）。

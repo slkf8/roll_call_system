@@ -94,6 +94,20 @@ d7005d0 refactor(sessions): extract regular session generation helpers
   - 主學生統計表 header 使用 sticky top-0 z-10，保持自然頁面捲動，窄畫面無整頁水平溢出。
 - **仍 out-of-scope**：原因 6 手動調整、正式 academic-year model、永久保存月份範圍、backend API、DB schema、Excel export、Windows 維修入口。
 
+## 5b. RC11 月份選擇互動修正（iPad-compatible native date overlay）
+
+- **feature commit**：`14146b022a1ae1e3ec8142e1ad5c684708790e1d`（`fix(month-picker): use iPad-compatible native date overlays`）。
+- **Git 狀態**：local only；**尚未 push 至 `origin/main`**；**RC11 release candidate tag 尚未建立**。
+- **行為**：
+  - MonthPage 中央月份改為 TodayPage-style transparent native `input[type=date]` overlay；tap 直接命中 native input；`showPicker()` 只作 desktop enhancement；選擇後正規化為 `YYYY-MM-01`；左右箭頭保留。
+  - DataPage 目標月份資訊區使用相同 transparent native overlay；選擇後正規化為月初；日期範圍 / 統計 / 學生表 / Excel export 資料流保留；上一個月 / 回到本月 / 下一個月保留。
+- **根因**：舊 MonthPage 路徑依賴 `0 × 0` hidden input、`pointer-events-none`、負 `z-index` 與 programmatic picker-only 觸發，在 iPad 上不可靠。
+- **驗收**：MonthPage targeted 3 files / 74 tests PASS；DataPage targeted 1 file / 60 tests PASS；full frontend regression 18 files / 365 tests PASS；frontend build PASS；Control Chrome desktop overlay acceptance PASS；`PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE`、`PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`。
+- **工具限制**：`TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP`、`TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。
+- **專屬驗收文件**：[`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
+- **permanent archive**：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iPadAcceptance_2026-06-08_MM46np/`。
+- **仍 out-of-scope**：backend API、SQLite、Excel export writer、正式模板、原因 6、老師服務月份範圍統計規則、RC10 artifact、RC10 tag、Windows portable、package、release。
+
 ## 6. 批量生成固定課次目前行為
 
 - 入口集中於 `MonthPage`「批量操作」→「批量生成固定課次」；`StudentsPage` 已**移除**該入口。

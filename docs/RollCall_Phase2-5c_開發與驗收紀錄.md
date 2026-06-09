@@ -134,6 +134,13 @@
   - Browser acceptance：Control Chrome isolated acceptance PASS with `TOOL_LIMITATION_NATIVE_MONTH_INPUT`；可可靠驗收主卡、Sheet 預設、空月份 validation、cancel / reopen reset、sticky desktop / narrow、dark mode；其餘 native month input 情境由 RTL 補充。
   - Runtime cleanup：isolated frontend `:5174` 與 backend `:18031` 已釋放；既有 `:5173` dev server 未操作。
   - Archive：`~/Documents/RollCall_AcceptanceArchives/DataPage_RangeStatsAcceptance_2026-06-08_l4vOJd/`；詳見 [`RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md`](RollCall_DataPage_RangeStats_StickyHeader_Acceptance_2026-06-08.md)。
+- **已完成（RC11 月份選擇互動修正，2026-06-08）**：feature commit `14146b022a1ae1e3ec8142e1ad5c684708790e1d`（`fix(month-picker): use iPad-compatible native date overlays`）將 MonthPage 中央月份與 DataPage 目標月份資訊區改為 TodayPage-style transparent native `input[type=date]` overlay。
+  - 行為：tap 直接命中 native input；`showPicker()` 只作 desktop enhancement；MonthPage 選擇後正規化為 `YYYY-MM-01`、DataPage 正規化為月初；MonthPage 左右箭頭與 DataPage 上一個月 / 回到本月 / 下一個月保留；DataPage 日期範圍 / 統計 / 學生表 / Excel export 資料流保留。
+  - 根因：舊 MonthPage 路徑依賴 `0 × 0` hidden input、`pointer-events-none`、負 `z-index` 與 programmatic picker-only 觸發，在 iPad 上不可靠。
+  - 測試：MonthPage targeted 3 files / 74 tests PASS；DataPage targeted 1 file / 60 tests PASS；full frontend regression 18 files / 365 tests PASS；frontend build PASS。
+  - 驗收：Control Chrome desktop overlay acceptance PASS；`PASS_RC11_IPAD_NATIVE_PICKER_MANUAL_ACCEPTANCE`、`PASS_RC11_LAN_EXPOSURE_CLOSED_READONLY_VERIFIED`；工具限制 `TOOL_LIMITATION_NATIVE_DATE_PICKER_POPUP`、`TOOL_LIMITATION_CONTROL_CHROME_DATE_INPUT_MUTATION`。
+  - Git 狀態：local only；**尚未 push 至 `origin/main`**；**RC11 release candidate tag 尚未建立**。
+  - Archive：`~/Documents/RollCall_AcceptanceArchives/RC11_MonthPicker_iPadAcceptance_2026-06-08_MM46np/`；詳見 [`RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md`](RollCall_RC11_MonthPicker_iPad_Acceptance_2026-06-08.md)。
 - **待辦**：RC10 post-tag docs stage gate、docs-only local commit、integrated main pre-push gate、單次 `git push origin main`；Windows 維修入口暫緩。
 - **已知限制**：
   - `backend/run.py` 的 `_ensure_production_cors_origins()` 會 `setdefault` `ROLL_CALL_ALLOWED_ORIGINS` 為「綁定埠」origins，跨埠 Vite dev（5173）會被 CORS 拒絕，除非顯式設 `ROLL_CALL_ALLOWED_ORIGINS`、改同源（`ROLL_CALL_FRONTEND_DIST`）或以 `uvicorn app.main:app --reload` 啟動。
