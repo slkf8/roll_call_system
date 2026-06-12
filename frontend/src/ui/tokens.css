@@ -1,0 +1,167 @@
+/*
+ * roll_call_system UI foundation tokens (Phase UI-3A)
+ * Authority: docs/ui-refactor/36_SPEC_UI_DESIGN_APPROVED.md §3
+ *
+ * Architecture: primitive → semantic → component.
+ * - Components must reference semantic tokens only (never --rc-prim-*).
+ * - Dark mode remaps the semantic layer only; primitives are theme-invariant.
+ * - accent expresses interaction only, never status.
+ * - pending uses neutral gray; conflict uses amber; absent uses red.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- */
+  /* Primitives (theme-invariant; not for component use)              */
+  /* ---------------------------------------------------------------- */
+  --rc-prim-white: #ffffff;
+  --rc-prim-gray-50: #f2f2f7;
+  --rc-prim-gray-100: #e5e5ea;
+  --rc-prim-gray-200: #d1d1d6;
+  --rc-prim-gray-400: #a1a1a6;
+  --rc-prim-gray-500: #8e8e93;
+  --rc-prim-gray-600: #636366;
+  --rc-prim-gray-700: #48484a;
+  --rc-prim-gray-800: #3a3a3c;
+  --rc-prim-gray-850: #2c2c2e;
+  --rc-prim-gray-900: #1c1c1e;
+  --rc-prim-gray-950: #111214;
+  --rc-prim-blue-600: #007aff;
+  --rc-prim-blue-500: #0a84ff;
+  --rc-prim-blue-300: #4da3ff;
+  --rc-prim-green-600: #248a3d;
+  --rc-prim-green-400: #30d158;
+  --rc-prim-red-600: #d70015;
+  --rc-prim-red-400: #ff6961;
+  --rc-prim-amber-700: #b45309;
+  --rc-prim-amber-400: #ffb340;
+  --rc-prim-indigo-600: #5856d6;
+  --rc-prim-indigo-400: #7d7aff;
+  --rc-prim-purple-600: #8944ab;
+  --rc-prim-purple-400: #da8fff;
+
+  /* ---------------------------------------------------------------- */
+  /* Semantic — Light (default)                                       */
+  /* ---------------------------------------------------------------- */
+  --rc-accent: var(--rc-prim-blue-600);
+  --rc-accent-contrast: var(--rc-prim-white);
+
+  --rc-surface-page: var(--rc-prim-gray-50);
+  --rc-surface-sidebar: var(--rc-prim-white);
+  --rc-surface-card: var(--rc-prim-white);
+  --rc-surface-inset: var(--rc-prim-gray-50);
+
+  --rc-text-primary: var(--rc-prim-gray-900);
+  --rc-text-secondary: var(--rc-prim-gray-600);
+  --rc-text-tertiary: var(--rc-prim-gray-500);
+
+  --rc-border-subtle: var(--rc-prim-gray-100);
+  --rc-separator: rgba(60, 60, 67, 0.12);
+
+  --rc-interactive-hover: rgba(0, 0, 0, 0.04);
+  --rc-interactive-pressed: rgba(0, 0, 0, 0.08);
+  --rc-interactive-disabled-opacity: 0.4;
+  --rc-focus-ring: rgba(0, 122, 255, 0.45);
+  --rc-focus-ring-width: 2px;
+
+  /* Status semantics: never expressed by color alone at component level */
+  --rc-status-present-fg: var(--rc-prim-green-600);
+  --rc-status-present-bg: rgba(52, 199, 89, 0.12);
+  --rc-status-absent-fg: var(--rc-prim-red-600);
+  --rc-status-absent-bg: rgba(255, 59, 48, 0.12);
+  --rc-status-pending-fg: var(--rc-prim-gray-600);
+  --rc-status-pending-bg: rgba(120, 120, 128, 0.12);
+  --rc-status-conflict-fg: var(--rc-prim-amber-700);
+  --rc-status-conflict-bg: rgba(255, 159, 10, 0.15);
+  --rc-status-holiday-fg: var(--rc-prim-indigo-600);
+  --rc-status-holiday-bg: rgba(88, 86, 214, 0.12);
+  --rc-status-makeup-fg: var(--rc-prim-purple-600);
+  --rc-status-makeup-bg: rgba(175, 82, 222, 0.12);
+
+  --rc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --rc-shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.18);
+
+  /* ---------------------------------------------------------------- */
+  /* Scales and layout constants (theme-invariant)                    */
+  /* ---------------------------------------------------------------- */
+  --rc-space-1: 4px;
+  --rc-space-2: 8px;
+  --rc-space-3: 12px;
+  --rc-space-4: 16px;
+  --rc-space-5: 20px;
+  --rc-space-6: 24px;
+  --rc-space-7: 32px;
+  --rc-space-8: 40px;
+
+  --rc-radius-sm: 8px;
+  --rc-radius-md: 12px;
+  --rc-radius-lg: 16px;
+  --rc-radius-xl: 24px;
+  --rc-radius-full: 9999px;
+
+  /* Typography: general user-facing text minimum is 12px.
+     11px (caption) is restricted to low-priority metadata only (36_SPEC §4). */
+  --rc-font-size-caption: 11px;
+  --rc-font-size-min: 12px;
+  --rc-font-size-body-sm: 13px;
+  --rc-font-size-body: 15px;
+  --rc-font-size-title: 17px;
+  --rc-font-size-heading: 22px;
+
+  /* Shell contract (36_SPEC §5): Desktop ≥1024px Sidebar 220px (200–240 allowed);
+     <1024px BottomTabBar. Icon Rail is not adopted. */
+  --rc-shell-sidebar-width: 220px;
+  --rc-shell-tabbar-height: 56px;
+  --rc-shell-touch-target-min: 44px;
+
+  /* Low motion (MOTION_INTENSITY 2/10) */
+  --rc-motion-fast: 120ms;
+  --rc-motion-standard: 180ms;
+}
+
+/* ------------------------------------------------------------------ */
+/* Semantic — Dark remap (semantic layer only; 36_SPEC §11)           */
+/* ------------------------------------------------------------------ */
+[data-theme="dark"] {
+  --rc-accent: var(--rc-prim-blue-500);
+  --rc-accent-contrast: var(--rc-prim-white);
+
+  --rc-surface-page: var(--rc-prim-gray-950);
+  --rc-surface-sidebar: var(--rc-prim-gray-900);
+  --rc-surface-card: var(--rc-prim-gray-900);
+  --rc-surface-inset: var(--rc-prim-gray-850);
+
+  --rc-text-primary: var(--rc-prim-white);
+  --rc-text-secondary: var(--rc-prim-gray-400);
+  --rc-text-tertiary: var(--rc-prim-gray-500);
+
+  --rc-border-subtle: rgba(255, 255, 255, 0.1);
+  --rc-separator: rgba(255, 255, 255, 0.1);
+
+  --rc-interactive-hover: rgba(255, 255, 255, 0.06);
+  --rc-interactive-pressed: rgba(255, 255, 255, 0.1);
+  --rc-focus-ring: rgba(10, 132, 255, 0.55);
+
+  --rc-status-present-fg: var(--rc-prim-green-400);
+  --rc-status-present-bg: rgba(48, 209, 88, 0.16);
+  --rc-status-absent-fg: var(--rc-prim-red-400);
+  --rc-status-absent-bg: rgba(255, 105, 97, 0.16);
+  --rc-status-pending-fg: var(--rc-prim-gray-400);
+  --rc-status-pending-bg: rgba(120, 120, 128, 0.24);
+  --rc-status-conflict-fg: var(--rc-prim-amber-400);
+  --rc-status-conflict-bg: rgba(255, 159, 10, 0.18);
+  --rc-status-holiday-fg: var(--rc-prim-indigo-400);
+  --rc-status-holiday-bg: rgba(94, 92, 230, 0.2);
+  --rc-status-makeup-fg: var(--rc-prim-purple-400);
+  --rc-status-makeup-bg: rgba(191, 90, 242, 0.2);
+
+  --rc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --rc-shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Reduced Motion (36_SPEC §12) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --rc-motion-fast: 0ms;
+    --rc-motion-standard: 0ms;
+  }
+}
