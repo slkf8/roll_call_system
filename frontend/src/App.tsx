@@ -9,7 +9,6 @@ import { fetchSessions } from "./api/sessionsApi";
 import { fetchGlobalEvents } from "./api/globalEventsApi";
 import type {
   TabKey,
-  TabDef,
   Session,
   GlobalEvent,
   StudentProfile,
@@ -17,19 +16,21 @@ import type {
 } from "./shared/appShared";
 import {
   STORAGE_KEY,
-  ThemeContext,
   studentProfilesSeed,
   studentScheduleRulesSeed,
   todayISO,
   addDaysISO,
-  BottomTabBar,
   Toast,
   IconToday,
   IconMonth,
   IconUsers,
   IconFile,
-  pageBackgroundClass,
 } from "./shared/appShared";
+import { ThemeProvider } from "./ui/theme";
+import { useTheme } from "./ui/themeContext";
+import { AppShell } from "./ui/shell/AppShell";
+import { ThemeToggle } from "./ui/shell/ThemeToggle";
+import type { ShellNavItem } from "./ui/shell/navigation";
 
 function toSessionStudent(profile: { id: number; name: string }) {
   return {
@@ -336,27 +337,20 @@ function restorePersistedData() {
   }
 }
 
-function getInitialTheme() {
-  try {
-    const savedTheme = localStorage.getItem("rollcall-theme");
-    return savedTheme === "dark" || savedTheme === "light" ? savedTheme : "light";
-  } catch {
-    return "light";
-  }
+export default function App() {
+  // Single ThemeProvider mount point (Phase UI-3B). The provider is the
+  // only rollcall-theme persistence writer; it also bridges the legacy
+  // boolean isDark ThemeContext for unmigrated pages.
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
 }
 
-export default function App() {
-  const [theme, setTheme] = useState<'light'|'dark'>(() => getInitialTheme());
-  const isDark = theme === 'dark';
+function AppContent() {
+  const { setTheme } = useTheme();
   const restoredData = useMemo(() => restorePersistedData(), []);
-  
-  useEffect(() => {
-    try {
-      localStorage.setItem("rollcall-theme", theme);
-    } catch (e) {
-      console.error("Save theme failed", e);
-    }
-  }, [theme]);
 
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const nextTab = restoredData?.activeTab;
@@ -527,98 +521,86 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const tabs: TabDef[] = useMemo(
+  const navItems: ShellNavItem[] = useMemo(
     () => [
-      {
-        key: "today",
-        label: "今日",
-        icon: (active) => <IconToday className={`h-6 w-6 ${active ? "" : ""}`} />,
-      },
-      {
-        key: "month",
-        label: "月份",
-        icon: (active) => <IconMonth className={`h-6 w-6 ${active ? "" : ""}`} />,
-      },
-      {
-        key: "students",
-        label: "學生",
-        icon: (active) => <IconUsers className={`h-6 w-6 ${active ? "" : ""}`} />,
-      },
-      {
-        key: "data",
-        label: "數據",
-        icon: (active) => <IconFile className={`h-6 w-6 ${active ? "" : ""}`} />,
-      },
+      { key: "today", label: "今日", icon: <IconToday className="h-5 w-5" /> },
+      { key: "month", label: "月份", icon: <IconMonth className="h-5 w-5" /> },
+      { key: "students", label: "學生", icon: <IconUsers className="h-5 w-5" /> },
+      { key: "data", label: "數據", icon: <IconFile className="h-5 w-5" /> },
     ],
     []
   );
 
   return (
-    <ThemeContext.Provider value={isDark}>
-      <div className={`min-h-screen font-sans transition-colors ${pageBackgroundClass(isDark)}`}>
-        {toast ? <Toast text={toast} /> : null}
+    <AppShell
+      items={navItems}
+      activeKey={activeTab}
+      onSelect={(key) => {
+        if (key === "today" || key === "month" || key === "students" || key === "data") {
+          setActiveTab(key);
+        }
+      }}
+      title="出席紀錄系統"
+      sidebarFooter={<ThemeToggle />}
+    >
+      {toast ? <Toast text={toast} /> : null}
 
-        <div className="pb-28">
-          {activeTab === "today" ? (
-            <TodayPage
-              setTheme={setTheme}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              now={now}
-              students={students}
-              sessions={sessions}
-              setSessions={setSessions}
-              isSessionsBackendAvailable={isSessionsBackendAvailable}
-              isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
-              globalEvents={globalEvents}
-              setGlobalEvents={setGlobalEvents}
-              setToast={setToast}
-            />
-          ) : activeTab === "month" ? (
-            <MonthPage
-              setTheme={setTheme}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              students={students}
-              studentScheduleRules={studentScheduleRules}
-              sessions={sessions}
-              setSessions={setSessions}
-              isSessionsBackendAvailable={isSessionsBackendAvailable}
-              isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
-              globalEvents={globalEvents}
-              setGlobalEvents={setGlobalEvents}
-              setToast={setToast}
-            />
-          ) : activeTab === "students" ? (
-            <StudentsPage
-              selectedDate={selectedDate}
-              students={students}
-              setStudents={setStudents}
-              isStudentsBackendAvailable={isStudentsBackendAvailable}
-              isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
-              isSessionsBackendAvailable={isSessionsBackendAvailable}
-              studentScheduleRules={studentScheduleRules}
-              setStudentScheduleRules={setStudentScheduleRules}
-              sessions={sessions}
-              setSessions={setSessions}
-              setToast={setToast}
-            />
-          ) : activeTab === "data" ? (
-            <DataPage
-              setTheme={setTheme}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              students={students}
-              studentScheduleRules={studentScheduleRules}
-              sessions={sessions}
-              globalEvents={globalEvents}
-              setToast={setToast}
-            />
-          ) : null}
-        </div>
-
-        <BottomTabBar tabs={tabs} active={activeTab} onSelect={setActiveTab} />
-      </div>
-    </ThemeContext.Provider>
+      {activeTab === "today" ? (
+        <TodayPage
+          setTheme={setTheme}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          now={now}
+          students={students}
+          sessions={sessions}
+          setSessions={setSessions}
+          isSessionsBackendAvailable={isSessionsBackendAvailable}
+          isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
+          globalEvents={globalEvents}
+          setGlobalEvents={setGlobalEvents}
+          setToast={setToast}
+        />
+      ) : activeTab === "month" ? (
+        <MonthPage
+          setTheme={setTheme}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          students={students}
+          studentScheduleRules={studentScheduleRules}
+          sessions={sessions}
+          setSessions={setSessions}
+          isSessionsBackendAvailable={isSessionsBackendAvailable}
+          isGlobalEventsBackendAvailable={isGlobalEventsBackendAvailable}
+          globalEvents={globalEvents}
+          setGlobalEvents={setGlobalEvents}
+          setToast={setToast}
+        />
+      ) : activeTab === "students" ? (
+        <StudentsPage
+          selectedDate={selectedDate}
+          students={students}
+          setStudents={setStudents}
+          isStudentsBackendAvailable={isStudentsBackendAvailable}
+          isScheduleRulesBackendAvailable={isScheduleRulesBackendAvailable}
+          isSessionsBackendAvailable={isSessionsBackendAvailable}
+          studentScheduleRules={studentScheduleRules}
+          setStudentScheduleRules={setStudentScheduleRules}
+          sessions={sessions}
+          setSessions={setSessions}
+          setToast={setToast}
+        />
+      ) : activeTab === "data" ? (
+        <DataPage
+          setTheme={setTheme}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          students={students}
+          studentScheduleRules={studentScheduleRules}
+          sessions={sessions}
+          globalEvents={globalEvents}
+          setToast={setToast}
+        />
+      ) : null}
+    </AppShell>
   );
 }

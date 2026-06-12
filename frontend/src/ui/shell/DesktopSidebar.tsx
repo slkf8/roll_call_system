@@ -27,11 +27,15 @@ export function DesktopSidebar({
   header,
   footer,
 }: DesktopSidebarProps) {
+  // min-h-screen (not h-full): height:100% resolves to auto inside the
+  // indefinite-height flex parent and opts out of align-items:stretch,
+  // collapsing the sidebar to content height. min-height keeps the
+  // viewport-height floor while stretch still tracks taller content.
   return (
     <nav
       data-testid="rc-desktop-sidebar"
       aria-label="主導航"
-      className="flex h-full shrink-0 flex-col"
+      className="flex min-h-screen shrink-0 flex-col"
       style={{
         width: tokenVar("shell.sidebarWidth"),
         background: tokenVar("surface.sidebar"),

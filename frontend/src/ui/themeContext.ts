@@ -6,6 +6,7 @@
  * Split from theme.tsx so that component files export components only.
  */
 import { createContext, useContext } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { THEME_STORAGE_KEY } from "./tokens";
 
 export type ThemeMode = "light" | "dark";
@@ -13,7 +14,9 @@ export type ThemeMode = "light" | "dark";
 export type RcThemeContextValue = {
   theme: ThemeMode;
   isDark: boolean;
-  setTheme: (theme: ThemeMode) => void;
+  /** Dispatch-typed so unmigrated pages' frozen setTheme prop contract
+      (Dispatch<SetStateAction<"light" | "dark">>) is satisfied directly. */
+  setTheme: Dispatch<SetStateAction<ThemeMode>>;
   toggleTheme: () => void;
 };
 

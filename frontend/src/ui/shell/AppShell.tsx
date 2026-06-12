@@ -15,6 +15,7 @@ import { tokenVar } from "../tokens";
 import { useIsDesktop } from "../useViewport";
 import { BottomTabBar } from "./BottomTabBar";
 import { DesktopSidebar } from "./DesktopSidebar";
+import { ThemeToggle } from "./ThemeToggle";
 import type { ShellNavItem } from "./navigation";
 
 type AppShellProps = {
@@ -60,6 +61,24 @@ export function AppShell({
 
   return (
     <div data-testid="rc-app-shell" className="min-h-screen" style={pageStyle}>
+      {/* Shell-level compact utility bar (<1024px only): hosts the global
+          ThemeToggle. Sticky in normal flow (occupies space, never covers
+          content); z-30 stays below Sheet z-50 and Toast z-[60]. */}
+      <header
+        data-testid="rc-mobile-utility-bar"
+        className="sticky top-0 z-30 flex justify-end"
+        style={{
+          background: tokenVar("surface.card"),
+          borderBottom: `1px solid ${tokenVar("border.subtle")}`,
+          padding: `calc(env(safe-area-inset-top) + var(--rc-space-1)) var(--rc-space-3) var(--rc-space-1)`,
+        }}
+      >
+        {/* Wrapper keeps the w-full ThemeToggle content-sized so the bar
+            content right-aligns with an empty left side (no page title). */}
+        <div>
+          <ThemeToggle />
+        </div>
+      </header>
       <main
         style={{
           // 不得遮擋內容: reserve space for the tab bar + safe area.
