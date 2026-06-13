@@ -62,6 +62,21 @@ const linkedMakeupSession: Session = {
   materialsReasonCode: null,
 };
 
+function makeSession(overrides: Partial<Session>): Session {
+  return {
+    ...baseSession,
+    id: overrides.id ?? baseSession.id,
+    start: overrides.start ?? baseSession.start,
+    status: overrides.status ?? baseSession.status,
+    kind: overrides.kind ?? baseSession.kind,
+    reason: overrides.reason,
+    note: overrides.note,
+    makeupOfDateISO: overrides.makeupOfDateISO,
+    makeupOfSessionId: overrides.makeupOfSessionId,
+    materialsProvided: overrides.materialsProvided ?? baseSession.materialsProvided,
+    materialsReasonCode: overrides.materialsReasonCode ?? baseSession.materialsReasonCode,
+  };
+}
 
 function TodayHarness({
   isSessionsBackendAvailable,
@@ -114,6 +129,188 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.restoreAllMocks();
+});
+
+
+describe("TodayPage UI-3C compact list contract", () => {
+  it("renders TodayPage sessions as one single-column list without a grid", () => {
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[
+          makeSession({ id: 20, start: "14:00" }),
+          makeSession({ id: 21, start: "15:00" }),
+        ]}
+      />
+    );
+
+    const list = screen.getByTestId("today-session-list");
+    expect(list).toBeInTheDocument();
+    expect(list.className).not.toMatch(/\bgrid\b/);
+    expect(screen.getAllByTestId("today-session-row")).toHaveLength(2);
+  });
+
+  it("keeps chronological order from earliest start time to latest", () => {
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[
+          makeSession({ id: 30, start: "18:00" }),
+          makeSession({ id: 31, start: "14:00" }),
+          makeSession({ id: 32, start: "16:00" }),
+        ]}
+      />
+    );
+
+    const rows = screen.getAllByTestId("today-session-row");
+    expect(rows[0]).toHaveTextContent("14:00");
+    expect(rows[1]).toHaveTextContent("16:00");
+    expect(rows[2]).toHaveTextContent("18:00");
+    expect(rows[0].textContent?.indexOf("14:00")).toBeLessThan(
+      rows[0].textContent?.indexOf("後端課次學生") ?? Number.POSITIVE_INFINITY
+    );
+  });
+
+  it("keeps the existing pending filter showing pending rows in the compact list", async () => {
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[
+          makeSession({ id: 40, start: "14:00", status: "present" }),
+          makeSession({ id: 41, start: "15:00", status: "pending" }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "待確認" }));
+
+    const rows = screen.getAllByTestId("today-session-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("15:00");
+    expect(rows[0]).toHaveTextContent("待確認");
+  });
+
+  it("uses compact rows with desktop-only single-line ellipsis secondary summaries", () => {
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    const row = screen.getByTestId("today-session-row");
+    expect(row.className).toContain("min-h-[64px]");
+    expect(row.className).toContain("overflow-hidden");
+    expect(row.className).toContain("min-w-0");
+
+    const summary = screen.getByTestId("today-secondary-summary");
+    expect(summary).toHaveTextContent("1小時課程 · 16:00–17:00");
+    expect(summary.className).toContain("hidden");
+    expect(summary.className).toContain("lg:block");
+    expect(summary.className).toContain("truncate");
+  });
+
+  it("keeps every row action at a 44px hit area and avoids mobile overflow-prone wrapping", () => {
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[makeSession({ status: "present" })]}
+      />
+    );
+
+    const row = screen.getByTestId("today-session-row");
+    expect(row.className).toContain("overflow-hidden");
+    const actions = screen.getByTestId("today-row-actions");
+    expect(actions.className).toContain("shrink-0");
+
+    for (const label of ["記錄已到", "記錄缺席", "撤銷", "更多"]) {
+      const button = within(actions).getByRole("button", { name: label });
+      expect(button.className).toContain("h-11");
+      expect(button.className).toContain("w-11");
+      expect(button).toHaveAttribute("title", label);
+    }
+  });
+
+  it("shows row-level conflict warning with icon and text without xl-only visibility", () => {
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialSessions={[
+          makeSession({ id: 50, start: "15:00" }),
+          makeSession({ id: 51, start: "15:00" }),
+        ]}
+      />
+    );
+
+    const row = screen.getAllByTestId("today-session-row")[0];
+    const warningLane = within(row).getByTestId("today-row-warnings");
+
+    expect(within(warningLane).getByText("衝突")).toBeInTheDocument();
+    expect(warningLane.querySelector("svg")).toBeInTheDocument();
+    expect(warningLane.className).not.toContain("hidden");
+    expect(warningLane.className).not.toContain("xl:flex");
+  });
+
+  it("shows row-level global alert warning with icon and text without hiding it on narrow layouts", () => {
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        initialGlobalEvents={[
+          {
+            id: 900,
+            dateISO: "2026-06-01",
+            mode: "allDay",
+            label: "停課",
+            leaveReason: "病假",
+          },
+        ]}
+      />
+    );
+
+    const row = screen.getByTestId("today-session-row");
+    const warningLane = within(row).getByTestId("today-row-warnings");
+
+    expect(within(warningLane).getByText("停課 · 病假")).toBeInTheDocument();
+    expect(warningLane.querySelector("svg")).toBeInTheDocument();
+    expect(warningLane.className).toContain("flex-wrap");
+    expect(warningLane.className).not.toContain("hidden");
+    expect(warningLane.className).not.toContain("xl:flex");
+  });
+
+  it("keeps conflict warning non-blocking for attendance actions", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <TodayHarness
+        isSessionsBackendAvailable={false}
+        setToast={setToast}
+        initialSessions={[
+          makeSession({ id: 60, start: "15:00" }),
+          makeSession({ id: 61, start: "15:00" }),
+        ]}
+      />
+    );
+
+    const firstRow = screen.getAllByTestId("today-session-row")[0];
+    expect(within(firstRow).getByText("衝突")).toBeInTheDocument();
+
+    await user.click(within(firstRow).getByRole("button", { name: "記錄已到" }));
+
+    expect(setToast).toHaveBeenCalledWith("後端課次學生 15:00 已到");
+  });
+
+  it("removes the TodayPage legacy page-level ThemeToggle", () => {
+    render(<TodayHarness isSessionsBackendAvailable={false} />);
+
+    expect(screen.queryByRole("button", { name: "切換為深色模式" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "切換為淺色模式" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the existing attendance toast behavior", async () => {
+    const setToast = vi.fn();
+    const user = userEvent.setup();
+    render(<TodayHarness isSessionsBackendAvailable={false} setToast={setToast} />);
+
+    await user.click(screen.getByLabelText("記錄已到"));
+
+    expect(setToast).toHaveBeenCalledWith("後端課次學生 16:00 已到");
+  });
 });
 
 

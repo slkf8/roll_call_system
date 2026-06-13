@@ -259,24 +259,19 @@ describe("App shell migration (Phase UI-3B)", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
 
-  it("keeps the unmigrated page-header theme toggle working via the provider bridge", async () => {
-    const user = userEvent.setup();
+  it("uses only the shell global ThemeToggle on TodayPage after the page-level toggle is removed", async () => {
     installMatchMedia(true);
-    const { store } = installMemoryLocalStorage();
     setStoredAppData(emptyAppData());
 
     render(<App />);
 
     expect(await screen.findByText("今日沒有課次")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "切換為深色模式" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "切換為淺色模式" })).not.toBeInTheDocument();
 
-    // Legacy segmented toggle rendered by TodayPage's HeaderBar.
-    await user.click(screen.getByRole("button", { name: "切換為深色模式" }));
-
-    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
-    expect(store.get(THEME_STORAGE_KEY)).toBe("dark");
-    expect(screen.getByRole("button", { name: "切換為深色模式" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    const sidebar = screen.getByTestId("rc-desktop-sidebar");
+    expect(
+      within(sidebar).getByRole("button", { name: "切換至深色模式" })
+    ).toBeInTheDocument();
   });
 });

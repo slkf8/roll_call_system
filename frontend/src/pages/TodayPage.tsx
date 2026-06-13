@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useContext } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import {
   createGlobalEvent,
   deleteGlobalEvent as deleteBackendGlobalEvent,
@@ -15,22 +15,30 @@ import type {
   MaterialsReasonCode,
   AbsenceSubmitValues,
   StudentProfile,
+  Status,
 } from "../shared/appShared";
 import {
   ThemeContext,
-  ThemeToggle,
   IconCalendar,
   IconChevronLeft,
   IconChevronRight,
   IconBan,
   IconPlus,
+  IconClock,
+  IconCheck,
+  IconX,
+  IconDots,
+  IconWarning,
+  IconUndo,
   closureReasonsSeed,
+  reasonsSeed,
   todayISO,
   addDaysISO,
   formatZHDate,
   timeToMinutes,
   addMinutes,
   endTime,
+  formatDurationMin,
   pad2,
   roundToNearest15Min,
   getNextSessionId,
@@ -42,18 +50,195 @@ import {
   getConflictCandidates,
   HeaderBar,
   SegmentedControl,
-  SessionCard,
   IOSSheet,
   FieldRow,
   DurationInput,
   Menu,
   AbsenceSheetBody,
+  Pill,
   REASON6_PER_SCHOOL_YEAR_LIMIT,
   resolveSchoolYearRange,
   countReason6ForStudent,
   applySessionToList,
 } from "../shared/appShared";
 import { readSchoolYearOverride } from "../shared/schoolYearStorage";
+
+const TODAY_PRESET_REASON_NAMES = new Set(reasonsSeed.map((reason) => reason.name));
+
+function TodayStatusPill({
+  session,
+  effectiveStatus,
+}: {
+  session: Session;
+  effectiveStatus: Status;
+}) {
+  if (effectiveStatus === "pending") {
+    return (
+      <Pill tone="muted" className="gap-1 whitespace-nowrap">
+        <IconClock className="h-4 w-4" /> 待確認
+      </Pill>
+    );
+  }
+
+  if (effectiveStatus === "present") {
+    return <Pill tone="success" className="whitespace-nowrap">已到</Pill>;
+  }
+
+  if (effectiveStatus === "absent") {
+    const presetReason =
+      session.reason && TODAY_PRESET_REASON_NAMES.has(session.reason.name)
+        ? ` · ${session.reason.name}`
+        : "";
+    return <Pill tone="danger" className="whitespace-nowrap">缺席{presetReason}</Pill>;
+  }
+
+  return <Pill tone="muted" className="whitespace-nowrap">停課</Pill>;
+}
+
+function TodayActionButton({
+  tone,
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  tone: "green" | "red" | "blue" | "gray";
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const isDark = useContext(ThemeContext);
+  const toneClass =
+    tone === "green"
+      ? (isDark ? "bg-emerald-900/20 border-emerald-900/50 text-emerald-400 active:bg-emerald-900/40" : "bg-emerald-50 border-emerald-200 text-emerald-700 active:bg-emerald-100")
+      : tone === "red"
+      ? (isDark ? "bg-rose-900/20 border-rose-900/50 text-rose-400 active:bg-rose-900/40" : "bg-rose-50 border-rose-200 text-rose-700 active:bg-rose-100")
+      : tone === "gray"
+      ? (isDark ? "bg-[#2C2C2E] border-white/10 text-[#D1D1D6] active:bg-[#3A3A3C]" : "bg-slate-50 border-slate-200 text-slate-700 active:bg-slate-100")
+      : (isDark ? "bg-[#2C2C2E] border-white/10 text-[#F2F2F7] active:bg-[#3A3A3C]" : "bg-[#EAF2FF] border-[#D6E7FF] text-[#2563EB] active:bg-[#DDEBFF]");
+  const stateClass = disabled
+    ? "opacity-40 cursor-not-allowed"
+    : "hover:ring-2 hover:ring-current/10 active:scale-[0.98]";
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] focus-visible:ring-offset-2 ${isDark ? "focus-visible:ring-offset-[#1C1C1E]" : "focus-visible:ring-offset-white"} ${stateClass} ${toneClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TodaySessionRow({
+  session,
+  effectiveStatus,
+  hasConflict,
+  globalAlert,
+  onPresent,
+  onAbsent,
+  onReset,
+  onOpenMenu,
+}: {
+  session: Session;
+  effectiveStatus: Status;
+  hasConflict?: boolean;
+  globalAlert?: string;
+  onPresent: () => void;
+  onAbsent: () => void;
+  onReset: () => void;
+  onOpenMenu: () => void;
+}) {
+  const isDark = useContext(ThemeContext);
+  const isBlocked = !!globalAlert;
+  const secondarySummary = [
+    session.kind === "makeup" && session.makeupOfDateISO
+      ? `補課（原 ${session.makeupOfDateISO}）`
+      : null,
+    `${formatDurationMin(session.durationMin)} · ${session.start}–${endTime(session)}`,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <article
+      data-testid="today-session-row"
+      className={`flex min-h-[64px] w-full min-w-0 flex-wrap items-center gap-2 overflow-hidden rounded-[18px] px-3 py-1 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 sm:gap-3 ${
+        isDark ? "bg-[#1C1C1E] ring-white/10" : "bg-white ring-[#E5E5EA]"
+      }`}
+    >
+      <div
+        className={`w-[52px] shrink-0 text-[18px] font-extrabold leading-none tabular-nums sm:w-[60px] ${
+          isDark ? "text-[#F2F2F7]" : "text-slate-800"
+        }`}
+      >
+        {session.start}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+          <div
+            className={`min-w-0 truncate text-[15px] font-bold sm:text-[16px] ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}
+          >
+            {getSessionStudentName(session)}
+          </div>
+          <div className="shrink-0">
+            <TodayStatusPill session={session} effectiveStatus={effectiveStatus} />
+          </div>
+        </div>
+      </div>
+
+      <div
+        data-testid="today-secondary-summary"
+        className={`hidden min-w-0 flex-1 truncate text-[13px] lg:block ${
+          isDark ? "text-[#8E8E93]" : "text-slate-500"
+        }`}
+      >
+        {secondarySummary}
+      </div>
+
+      <div
+        data-testid="today-row-warnings"
+        className="flex min-w-0 shrink flex-wrap items-center justify-end gap-1.5"
+      >
+        {globalAlert ? (
+          <Pill tone="danger" className={isDark ? "gap-1" : "gap-1 bg-amber-50 text-amber-700 border-amber-200"}>
+            <IconWarning className="h-3.5 w-3.5" />
+            {globalAlert}
+          </Pill>
+        ) : null}
+        {hasConflict && !globalAlert && session.status !== "cancelled" ? (
+          <Pill tone="danger" className={isDark ? "gap-1" : "gap-1 bg-amber-50 text-amber-700 border-amber-200"}>
+            <IconWarning className="h-3.5 w-3.5" />
+            衝突
+          </Pill>
+        ) : null}
+      </div>
+
+      <div data-testid="today-row-actions" className="ml-auto flex shrink-0 items-center gap-1">
+        <TodayActionButton tone="green" label="記錄已到" onClick={onPresent} disabled={isBlocked}>
+          <IconCheck className="h-6 w-6" />
+        </TodayActionButton>
+        <TodayActionButton tone="red" label="記錄缺席" onClick={onAbsent} disabled={isBlocked}>
+          <IconX className="h-6 w-6" />
+        </TodayActionButton>
+        {effectiveStatus !== "pending" && (
+          <TodayActionButton tone="gray" label="撤銷" onClick={onReset} disabled={isBlocked}>
+            <IconUndo className="h-5 w-5" />
+          </TodayActionButton>
+        )}
+        <TodayActionButton tone="blue" label="更多" onClick={onOpenMenu}>
+          <IconDots className="h-6 w-6" />
+        </TodayActionButton>
+      </div>
+    </article>
+  );
+}
 
 export interface TodayPageProps {
   setTheme: Dispatch<SetStateAction<"light" | "dark">>;
@@ -71,7 +256,6 @@ export interface TodayPageProps {
 }
 
 export default function TodayPage({
-  setTheme,
   selectedDate,
   setSelectedDate,
   now,
@@ -177,6 +361,7 @@ export default function TodayPage({
   const [createDuration, setCreateDuration] = useState<number>(60);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Date changes intentionally close transient menus/sheets.
     setMenuOpenId(null);
     setAbsentOpen(false);
     setMakeupOpen(false);
@@ -722,13 +907,6 @@ export default function TodayPage({
         <HeaderBar
           title="出席紀錄系統"
           icon={<IconCalendar className="h-6 w-6" />}
-          right={
-            <ThemeToggle
-              isDark={isDark}
-              interactive={true}
-              onSelect={(next) => setTheme(next)}
-            />
-          }
         />
 
         <div className={`mt-5 rounded-[18px] shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 px-3 py-2 ${
@@ -770,7 +948,9 @@ export default function TodayPage({
                     if (e.target.value) setSelectedDate(e.target.value);
                   }}
                   onClick={() => {
-                    const input = datePickerRef.current as any;
+                    const input = datePickerRef.current as (HTMLInputElement & {
+                      showPicker?: () => void;
+                    }) | null;
                     if (input && typeof input.showPicker === 'function') {
                       try {
                         input.showPicker();
@@ -875,220 +1055,111 @@ export default function TodayPage({
           />
         </div>
 
-        <div className="mt-6 space-y-8">
-          <div className="space-y-4">
-            <div className={`px-1 text-sm font-bold ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>
-              未完成點名 ({visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending").length})
-            </div>
-            {visibleSessions.length === 0 ? (
-              <div className={`rounded-[24px] border border-dashed py-6 text-center text-sm ${
-                isDark ? 'border-white/10 bg-[#1C1C1E]/50 text-[#8E8E93]' : 'border-slate-300 bg-white/50 text-slate-400'
-              }`}>
-                今日沒有課次
-              </div>
-            ) : visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending").length === 0 ? (
-              <div className={`rounded-[24px] border border-dashed py-6 text-center text-sm ${
-                isDark ? 'border-white/10 bg-[#1C1C1E]/50 text-[#8E8E93]' : 'border-slate-300 bg-white/50 text-slate-400'
-              }`}>
-                今日已全部完成
-              </div>
-            ) : (
-              visibleSessions
-                .filter((s) => getEffectiveStatus(s, currentGlobalEvent) === "pending")
-                .map((s) => (
-                  <div key={s.id} className="relative">
-                    <SessionCard
-                      s={s}
-                      effectiveStatus={getEffectiveStatus(s, currentGlobalEvent)}
-                      hasConflict={conflictingSessionIds.has(s.id)}
-                      globalAlert={isSessionCovered(s, currentGlobalEvent) ? formatGlobalAlert(currentGlobalEvent) : undefined}
-                      onPresent={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        void updateAttendanceSession(
-                          s,
-                          { status: "present", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
-                          `${getSessionStudentName(s)} ${s.start} 已到`
-                        );
-                      }}
-                      onAbsent={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        openAbsent(s.id);
-                      }}
-                      onReset={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        void updateAttendanceSession(
-                          s,
-                          { status: "pending", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
-                          "已撤銷，回到未點名"
-                        );
-                      }}
-                      onOpenMenu={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
-                    />
-                    <Menu
-                    open={menuOpenId === s.id}
-                    onClose={() => setMenuOpenId(null)}
-                    items={[
-                        {
-                        label: "編輯課次（時間 / 時長）",
-                        onClick: () => {
-                            setMenuOpenId(null);
-                            openEditFromMenu(s.id);
-                        },
-                        },
-                        {
-                        label: "安排補課（補回本堂）",
-                        onClick: () => {
-                            setMenuOpenId(null);
-                            openMakeupFromMenu(s.id, "makeup");
-                        },
-                        },
-                        {
-                        label: "額外加課（不抵扣缺席）",
-                        onClick: () => {
-                            setMenuOpenId(null);
-                            openMakeupFromMenu(s.id, "extra");
-                        },
-                        },
-                        {
-                        label: s.kind === "makeup" ? "刪除此補課" : s.kind === "extra" ? "刪除此加課" : "刪除此課次",
-                        onClick: () => {
-                            setMenuOpenId(null);
-                            requestDelete(s.id);
-                        },
-                        danger: true,
-                        },
-                        {
-                        label: s.status === "cancelled" ? "取消停課" : "標記停課",
-                        onClick: () => {
-                            setMenuOpenId(null);
-                            void updateAttendanceSession(
-                              s,
-                              {
-                                status: s.status === "cancelled" ? "pending" : "cancelled",
-                                reason: null,
-                                note: null,
-                                materialsProvided: false,
-                                materialsReasonCode: null,
-                              },
-                              s.status === "cancelled" ? "已取消停課" : "已標記停課"
-                            );
-                        },
-                        danger: true,
-                        },
-                    ]}
-                    />
-                  </div>
-                ))
-            )}
+        <div className="mt-6">
+          <div className={`px-1 text-sm font-bold ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>
+            課次列表 ({visibleSessions.length})
           </div>
-
-          {visibleSessions.filter((s) => getEffectiveStatus(s, currentGlobalEvent) !== "pending").length > 0 && (
-            <div className="space-y-4">
-              <div className={`px-1 text-sm font-bold ${isDark ? 'text-[#8E8E93]' : 'text-slate-400'}`}>已完成 / 其他</div>
-              {visibleSessions
-                .filter((s) => getEffectiveStatus(s, currentGlobalEvent) !== "pending")
-                .map((s) => (
-                  <div key={s.id} className="relative">
-                    <SessionCard
-                      s={s}
-                      effectiveStatus={getEffectiveStatus(s, currentGlobalEvent)}
-                      hasConflict={conflictingSessionIds.has(s.id)}
-                      globalAlert={isSessionCovered(s, currentGlobalEvent) ? formatGlobalAlert(currentGlobalEvent) : undefined}
-                      onPresent={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        void updateAttendanceSession(
-                          s,
-                          { status: "present", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
-                          `${getSessionStudentName(s)} ${s.start} 已到`
-                        );
-                      }}
-                      onAbsent={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        openAbsent(s.id);
-                      }}
-                      onReset={() => {
-                        if (isSessionCovered(s, currentGlobalEvent)) {
-                          setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
-                          return;
-                        }
-                        void updateAttendanceSession(
-                          s,
-                          { status: "pending", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
-                          "已撤銷，回到未點名"
-                        );
-                      }}
-                      onOpenMenu={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
-                    />
-                    <Menu
+          {visibleSessions.length === 0 ? (
+            <div className={`mt-4 rounded-[24px] border border-dashed py-6 text-center text-sm ${
+              isDark ? 'border-white/10 bg-[#1C1C1E]/50 text-[#8E8E93]' : 'border-slate-300 bg-white/50 text-slate-400'
+            }`}>
+              今日沒有課次
+            </div>
+          ) : (
+            <div data-testid="today-session-list" className="mt-4 space-y-2">
+              {visibleSessions.map((s) => (
+                <div key={s.id} className="relative">
+                  <TodaySessionRow
+                    session={s}
+                    effectiveStatus={getEffectiveStatus(s, currentGlobalEvent)}
+                    hasConflict={conflictingSessionIds.has(s.id)}
+                    globalAlert={isSessionCovered(s, currentGlobalEvent) ? formatGlobalAlert(currentGlobalEvent) : undefined}
+                    onPresent={() => {
+                      if (isSessionCovered(s, currentGlobalEvent)) {
+                        setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
+                        return;
+                      }
+                      void updateAttendanceSession(
+                        s,
+                        { status: "present", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
+                        `${getSessionStudentName(s)} ${s.start} 已到`
+                      );
+                    }}
+                    onAbsent={() => {
+                      if (isSessionCovered(s, currentGlobalEvent)) {
+                        setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
+                        return;
+                      }
+                      openAbsent(s.id);
+                    }}
+                    onReset={() => {
+                      if (isSessionCovered(s, currentGlobalEvent)) {
+                        setToast(`⚠️ 本節已被「${formatGlobalAlert(currentGlobalEvent)}」覆蓋，已鎖定操作`);
+                        return;
+                      }
+                      void updateAttendanceSession(
+                        s,
+                        { status: "pending", reason: null, note: null, materialsProvided: false, materialsReasonCode: null },
+                        "已撤銷，回到未點名"
+                      );
+                    }}
+                    onOpenMenu={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
+                  />
+                  <Menu
                     open={menuOpenId === s.id}
                     onClose={() => setMenuOpenId(null)}
                     items={[
-                        {
+                      {
                         label: "編輯課次（時間 / 時長）",
                         onClick: () => {
-                            setMenuOpenId(null);
-                            openEditFromMenu(s.id);
+                          setMenuOpenId(null);
+                          openEditFromMenu(s.id);
                         },
-                        },
-                        {
+                      },
+                      {
                         label: "安排補課（補回本堂）",
                         onClick: () => {
-                            setMenuOpenId(null);
-                            openMakeupFromMenu(s.id, "makeup");
+                          setMenuOpenId(null);
+                          openMakeupFromMenu(s.id, "makeup");
                         },
-                        },
-                        {
+                      },
+                      {
                         label: "額外加課（不抵扣缺席）",
                         onClick: () => {
-                            setMenuOpenId(null);
-                            openMakeupFromMenu(s.id, "extra");
+                          setMenuOpenId(null);
+                          openMakeupFromMenu(s.id, "extra");
                         },
-                        },
-                        {
+                      },
+                      {
                         label: s.kind === "makeup" ? "刪除此補課" : s.kind === "extra" ? "刪除此加課" : "刪除此課次",
                         onClick: () => {
-                            setMenuOpenId(null);
-                            requestDelete(s.id);
+                          setMenuOpenId(null);
+                          requestDelete(s.id);
                         },
                         danger: true,
-                        },
-                        {
+                      },
+                      {
                         label: s.status === "cancelled" ? "取消停課" : "標記停課",
                         onClick: () => {
-                            setMenuOpenId(null);
-                            void updateAttendanceSession(
-                              s,
-                              {
-                                status: s.status === "cancelled" ? "pending" : "cancelled",
-                                reason: null,
-                                note: null,
-                                materialsProvided: false,
-                                materialsReasonCode: null,
-                              },
-                              s.status === "cancelled" ? "已取消停課" : "已標記停課"
-                            );
+                          setMenuOpenId(null);
+                          void updateAttendanceSession(
+                            s,
+                            {
+                              status: s.status === "cancelled" ? "pending" : "cancelled",
+                              reason: null,
+                              note: null,
+                              materialsProvided: false,
+                              materialsReasonCode: null,
+                            },
+                            s.status === "cancelled" ? "已取消停課" : "已標記停課"
+                          );
                         },
                         danger: true,
-                        },
+                      },
                     ]}
-                    />
-                  </div>
-                ))}
+                  />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1154,7 +1225,7 @@ export default function TodayPage({
           <FieldRow label="用途">
             <select
               value={mkPurpose}
-              onChange={(e) => setMkPurpose(e.target.value as any)}
+              onChange={(e) => setMkPurpose(e.target.value as "makeup" | "extra")}
               className={`rounded-2xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
                 isDark ? 'bg-[#1C1C1E] border-white/10 text-[#F2F2F7] focus:ring-white/20' : 'bg-white border-[#E5E5EA] text-slate-800 focus:ring-[#C7DAFF]'
               }`}
@@ -1330,7 +1401,7 @@ export default function TodayPage({
           <FieldRow label="模式">
             <select
               value={editingGlobal.mode}
-              onChange={e => setEditingGlobal(p => ({ ...p, mode: e.target.value as any }))}
+              onChange={e => setEditingGlobal(p => ({ ...p, mode: e.target.value as GlobalEvent["mode"] }))}
               className={`bg-transparent text-sm font-semibold focus:outline-none text-right ${
                 isDark ? 'text-[#F2F2F7]' : 'text-slate-900'
               }`}
