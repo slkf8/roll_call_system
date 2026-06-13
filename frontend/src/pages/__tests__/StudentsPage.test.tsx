@@ -189,7 +189,7 @@ function renderStudentsPage(options: {
   isScheduleRulesBackendAvailable?: boolean;
   isSessionsBackendAvailable?: boolean;
 } = {}) {
-  let snapshot: Snapshot = {
+  const snapshot: Snapshot = {
     students: [],
     rules: [],
     sessions: [],
@@ -314,6 +314,125 @@ function backendSessionResponse(overrides: Partial<Session> & { scheduleRuleId?:
 }
 
 describe("StudentsPage", () => {
+  describe("UI-3D baseline-safe restyle contract", () => {
+    it("keeps a single Students list and does not introduce desktop split/detail/view state surfaces", () => {
+      renderStudentsPage();
+
+      expect(screen.getByTestId("students-list")).toBeInTheDocument();
+      expect(screen.getAllByTestId("student-card")).toHaveLength(3);
+      expect(screen.queryByTestId("students-split-view")).not.toBeInTheDocument();
+      expect(screen.queryByText("View State")).not.toBeInTheDocument();
+      expect(screen.queryByText("Edit State")).not.toBeInTheDocument();
+      expect(screen.queryByText("未儲存")).not.toBeInTheDocument();
+    });
+
+    it("uses data-driven filter counts with the approved status labels", () => {
+      renderStudentsPage();
+
+      expect(screen.getByRole("button", { name: "全部 3" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "啟用中 1" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "已設定停用 1" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "已停用 1" })).toBeInTheDocument();
+      expect(screen.getAllByTestId("student-status-badge").map((badge) => badge.textContent)).toEqual([
+        "啟用中",
+        "已設定停用",
+        "已停用",
+      ]);
+    });
+
+    it("keeps the approved student fields only and rejects unverified Board 3 fields", async () => {
+      const { user } = renderStudentsPage();
+
+      await openStudentEditor(user, "陳小明");
+      const sheet = screen.getByTestId("students-sheet-body");
+
+      for (const label of ["姓名", "生日", "學校", "ID", "狀態"]) {
+        expect(within(sheet).getByText(label)).toBeInTheDocument();
+      }
+
+      for (const forbidden of ["電話", "時薪", "開始日期", "備註"]) {
+        expect(within(sheet).queryByText(forbidden)).not.toBeInTheDocument();
+      }
+    });
+
+    it("shows deactivate date only for scheduled deactivation students", async () => {
+      const { user } = renderStudentsPage();
+
+      await openStudentEditor(user, "陳小明");
+      expect(screen.queryByText(/停用日期：/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "取消" }));
+
+      await openStudentEditor(user, "李小欣");
+      expect(screen.getByText("停用日期：2026-05-01")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "取消" }));
+
+      await openStudentEditor(user, "王家朗");
+      expect(screen.queryByText(/停用日期：/)).not.toBeInTheDocument();
+    });
+
+    it("preserves the approved action matrix and does not add delete-student actions", async () => {
+      const { user } = renderStudentsPage();
+
+      await user.click(within(getStudentCard("陳小明")).getByLabelText("開啟學生操作選單"));
+      expect(screen.getByRole("button", { name: "查看 / 編輯資料" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "立即停用" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "指定日期停用" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "刪除學生" })).not.toBeInTheDocument();
+
+      await user.click(within(getStudentCard("李小欣")).getByLabelText("開啟學生操作選單"));
+      expect(screen.getByRole("button", { name: "修改停用日期" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "取消停用設定" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "立即停用" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "刪除學生" })).not.toBeInTheDocument();
+
+      await user.click(within(getStudentCard("王家朗")).getByLabelText("開啟學生操作選單"));
+      expect(screen.getByRole("button", { name: "恢復學生" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "刪除學生" })).not.toBeInTheDocument();
+    });
+
+    it("keeps StudentsPage IOSSheet editable with 88vh-bounded internal scroll and reachable Save/Cancel", async () => {
+      const { user } = renderStudentsPage();
+
+      await openStudentEditor(user, "陳小明");
+
+      const sheet = screen.getByTestId("students-sheet-body");
+      expect(sheet.className).toContain("max-h-[calc(88vh-112px)]");
+      expect(sheet.className).toContain("overflow-y-auto");
+      expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument();
+      expect(screen.getByTestId("students-danger-action-group")).toBeInTheDocument();
+    });
+
+    it("keeps visible row and schedule actions at a 44px minimum hit area", async () => {
+      const { user } = renderStudentsPage();
+      const card = getStudentCard("陳小明");
+
+      expect(within(card).getByLabelText("開啟學生操作選單").className).toContain("h-11");
+      expect(within(card).getByLabelText("開啟學生操作選單").className).toContain("w-11");
+      expect(within(card).getByRole("button", { name: "展開固定課表" }).className).toContain("min-h-11");
+
+      await expandSchedule(user, "陳小明");
+
+      for (const label of [
+        "生成本月 regular 課次",
+        "清除本月 regular",
+        "重新生成本月 regular",
+        "新增固定課表",
+      ]) {
+        expect(within(card).getByRole("button", { name: label }).className).toContain("min-h-11");
+      }
+    });
+
+    it("does not add a StudentsPage page-level ThemeToggle", () => {
+      renderStudentsPage();
+
+      expect(screen.queryByRole("button", { name: "切換至深色模式" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "切換至淺色模式" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "切換為深色模式" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "切換為淺色模式" })).not.toBeInTheDocument();
+    });
+  });
+
   it("shows an empty state when there are no students", () => {
     renderStudentsPage({
       initialStudents: [],

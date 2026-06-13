@@ -1,5 +1,5 @@
 import { useContext, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { createSession, deleteSession } from "../api/sessionsApi";
 import { createStudent, updateStudent } from "../api/studentsApi";
 import type { UpdateStudentPayload } from "../api/studentsApi";
@@ -14,7 +14,6 @@ import {
   todayISO,
   ThemeContext,
   HeaderBar,
-  SegmentedControl,
   IOSSheet,
   FieldRow,
   DurationInput,
@@ -50,6 +49,17 @@ type RuleDraft = {
   isActive: boolean;
 };
 
+function StudentsSheetBody({ children }: { children: ReactNode }) {
+  return (
+    <div
+      data-testid="students-sheet-body"
+      className="max-h-[calc(88vh-112px)] overflow-y-auto overscroll-contain pr-1"
+    >
+      {children}
+    </div>
+  );
+}
+
 type StudentsPageProps = {
   selectedDate?: string;
   students?: StudentProfile[];
@@ -63,6 +73,51 @@ type StudentsPageProps = {
   setSessions?: Dispatch<SetStateAction<Session[]>>;
   setToast?: Dispatch<SetStateAction<string>>;
 };
+
+function StudentsFilterControl({
+  value,
+  onChange,
+  options,
+  isDark,
+}: {
+  value: StudentFilter;
+  onChange: (value: StudentFilter) => void;
+  options: Array<{ value: StudentFilter; label: string }>;
+  isDark: boolean;
+}) {
+  return (
+    <div
+      data-testid="students-filter-control"
+      className={cx(
+        "grid grid-cols-2 gap-2 rounded-2xl p-1 sm:grid-cols-4",
+        isDark ? "bg-[#1C1C1E] ring-1 ring-white/10" : "bg-[#E5E5EA] ring-1 ring-black/5"
+      )}
+    >
+      {options.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={cx(
+              "min-h-11 rounded-xl px-3 py-2 text-[12px] font-semibold transition",
+              active
+                ? isDark
+                  ? "bg-[#2C2C2E] text-white shadow-sm ring-1 ring-white/10"
+                  : "bg-white text-slate-900 shadow-sm ring-1 ring-black/5"
+                : isDark
+                ? "text-[#8E8E93] hover:text-[#D1D1D6]"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -808,24 +863,24 @@ export default function StudentsPage({
     : "w-full rounded-2xl border border-[#E5E5EA] bg-white px-4 py-3 text-[15px] text-[#1C1C1E] outline-none transition placeholder:text-[#8E8E93] focus:border-[#C7DAFF] focus:ring-2 focus:ring-[#C7DAFF]";
 
   const secondaryButtonClass = isDark
-    ? "rounded-full bg-[#2C2C2E] px-4 py-2.5 text-[14px] font-medium text-white transition hover:bg-[#3A3A3C]"
-    : "rounded-full bg-[#F2F2F7] px-4 py-2.5 text-[14px] font-medium text-[#1C1C1E] ring-1 ring-[#E5E5EA] transition hover:bg-[#EAEAEE]";
+    ? "inline-flex min-h-11 items-center justify-center rounded-full bg-[#2C2C2E] px-4 py-2.5 text-[14px] font-medium text-white transition hover:bg-[#3A3A3C]"
+    : "inline-flex min-h-11 items-center justify-center rounded-full bg-[#F2F2F7] px-4 py-2.5 text-[14px] font-medium text-[#1C1C1E] ring-1 ring-[#E5E5EA] transition hover:bg-[#EAEAEE]";
 
   const primaryButtonClass = isDark
-    ? "rounded-full bg-[#0A84FF] px-4 py-2.5 text-[14px] font-semibold text-white transition hover:brightness-110"
-    : "rounded-full bg-[#007AFF] px-4 py-2.5 text-[14px] font-semibold text-white transition hover:brightness-105";
+    ? "inline-flex min-h-11 items-center justify-center rounded-full bg-[#0A84FF] px-4 py-2.5 text-[14px] font-semibold text-white transition hover:brightness-110"
+    : "inline-flex min-h-11 items-center justify-center rounded-full bg-[#007AFF] px-4 py-2.5 text-[14px] font-semibold text-white transition hover:brightness-105";
 
   const dangerButtonClass = isDark
-    ? "rounded-full bg-red-500/12 px-4 py-2.5 text-[14px] font-medium text-red-300 transition hover:bg-red-500/18"
-    : "rounded-full bg-red-500/10 px-4 py-2.5 text-[14px] font-medium text-red-600 transition hover:bg-red-500/15";
+    ? "inline-flex min-h-11 items-center justify-center rounded-full bg-red-500/12 px-4 py-2.5 text-[14px] font-medium text-red-300 transition hover:bg-red-500/18"
+    : "inline-flex min-h-11 items-center justify-center rounded-full bg-red-500/10 px-4 py-2.5 text-[14px] font-medium text-red-600 transition hover:bg-red-500/15";
 
   const compactButtonClass = isDark
-    ? "rounded-full bg-[#2C2C2E] px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-[#3A3A3C]"
-    : "rounded-full bg-[#F2F2F7] px-3 py-1.5 text-[12px] font-medium text-[#1C1C1E] ring-1 ring-[#E5E5EA] transition hover:bg-[#EAEAEE]";
+    ? "inline-flex min-h-11 items-center justify-center rounded-full bg-[#2C2C2E] px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-[#3A3A3C]"
+    : "inline-flex min-h-11 items-center justify-center rounded-full bg-[#F2F2F7] px-3 py-1.5 text-[12px] font-medium text-[#1C1C1E] ring-1 ring-[#E5E5EA] transition hover:bg-[#EAEAEE]";
 
   const compactDangerButtonClass = isDark
-    ? "rounded-full bg-red-500/12 px-3 py-1.5 text-[12px] font-medium text-red-300 transition hover:bg-red-500/18"
-    : "rounded-full bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-600 transition hover:bg-red-500/15";
+    ? "inline-flex min-h-11 items-center justify-center rounded-full bg-red-500/12 px-3 py-1.5 text-[12px] font-medium text-red-300 transition hover:bg-red-500/18"
+    : "inline-flex min-h-11 items-center justify-center rounded-full bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-600 transition hover:bg-red-500/15";
 
   function openCreateSheet() {
     setEditorMode("create");
@@ -1195,14 +1250,15 @@ export default function StudentsPage({
             <div className="p-4">
               <div className="text-[13px] font-medium text-[#8E8E93]">狀態篩選</div>
               <div className="mt-3">
-                <SegmentedControl
+                <StudentsFilterControl
                   value={filter}
-                  onChange={(value) => setFilter(value as StudentFilter)}
+                  onChange={setFilter}
+                  isDark={isDark}
                   options={[
-                    { value: "all", label: "全部" },
-                    { value: "active", label: "啟用中" },
-                    { value: "scheduled_deactivation", label: "已設定停用" },
-                    { value: "inactive", label: "已停用" },
+                    { value: "all", label: `全部 ${summary.all}` },
+                    { value: "active", label: `啟用中 ${summary.active}` },
+                    { value: "scheduled_deactivation", label: `已設定停用 ${summary.scheduled}` },
+                    { value: "inactive", label: `已停用 ${summary.inactive}` },
                   ]}
                 />
               </div>
@@ -1227,7 +1283,7 @@ export default function StudentsPage({
             ))}
           </div>
 
-          <div className="space-y-3">
+          <div data-testid="students-list" className="space-y-3">
             {safeStudents.length === 0 ? (
               <div className={cardClass}>
                 <div className="py-10 text-center">
@@ -1253,11 +1309,11 @@ export default function StudentsPage({
               </div>
             ) : (
               filteredStudents.map((student) => (
-                <div key={student.id} className={cx(cardClass, "relative p-0")}>
+                <div key={student.id} data-testid="student-card" className={cx(cardClass, "relative p-0")}>
                   <button
                     type="button"
                     onClick={() => openEditSheet(student)}
-                    className="block w-full px-4 py-4 text-left"
+                    className="block min-h-11 w-full px-4 py-4 text-left"
                   >
                     <div className="flex items-start justify-between gap-4 pr-12">
                       <div className="min-w-0">
@@ -1266,6 +1322,7 @@ export default function StudentsPage({
                             {student.name}
                           </div>
                           <span
+                            data-testid="student-status-badge"
                             className={cx(
                               "rounded-full px-2.5 py-1 text-[12px] font-medium",
                               getStatusBadgeClasses(isDark, student.status)
@@ -1292,11 +1349,13 @@ export default function StudentsPage({
                     <div className="relative pt-0.5">
                       <button
                         type="button"
+                        aria-label="開啟學生操作選單"
+                        title="開啟學生操作選單"
                         onClick={() =>
                           setMenuOpenId((cur) => (cur === student.id ? null : student.id))
                         }
                         className={cx(
-                          "flex h-9 w-9 items-center justify-center rounded-full text-[18px] transition",
+                          "flex h-11 w-11 items-center justify-center rounded-full text-[18px] transition",
                           isDark
                             ? "bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]"
                             : "bg-[#F2F2F7] text-[#1C1C1E] ring-1 ring-[#E5E5EA] hover:bg-[#EAEAEE]"
@@ -1332,7 +1391,7 @@ export default function StudentsPage({
                             aria-controls={sectionId}
                             aria-label={expanded ? "收起固定課表" : "展開固定課表"}
                             className={cx(
-                              "flex w-full items-center justify-between gap-3 rounded-2xl px-2 py-2 text-left transition",
+                              "flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl px-2 py-2 text-left transition",
                               isDark ? "hover:bg-white/5" : "hover:bg-black/[0.03]"
                             )}
                           >
@@ -1485,6 +1544,7 @@ export default function StudentsPage({
           emphasize: true,
         }}
       >
+        <StudentsSheetBody>
         <div className="space-y-5">
           <div className={cardClass}>
             <div className="p-4">
@@ -1548,7 +1608,7 @@ export default function StudentsPage({
                       <div className="text-[14px] text-[#8E8E93]">
                         停用後會影響未來排課；恢復後不會自動恢復之前移除的未來課次。
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div data-testid="students-danger-action-group" className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => openAction(editingStudent, "deactivate_now")}
@@ -1575,7 +1635,7 @@ export default function StudentsPage({
                       <div className="text-[14px] text-[#8E8E93]">
                         當日及之後的已排課課次將被移除。
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div data-testid="students-danger-action-group" className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => openAction(editingStudent, "change_deactivation")}
@@ -1606,7 +1666,7 @@ export default function StudentsPage({
                       <div className="text-[14px] text-[#8E8E93]">
                         恢復後可重新用於排課；先前已移除的未來課次不會自動恢復。
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div data-testid="students-danger-action-group" className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => openAction(editingStudent, "restore")}
@@ -1631,6 +1691,7 @@ export default function StudentsPage({
             </div>
           </div>
         </div>
+        </StudentsSheetBody>
       </IOSSheet>
 
       <IOSSheet
@@ -1645,6 +1706,7 @@ export default function StudentsPage({
           emphasize: true,
         }}
       >
+        <StudentsSheetBody>
         <div className="space-y-5">
           <div className={cardClass}>
             <div className="p-4">
@@ -1705,6 +1767,7 @@ export default function StudentsPage({
             </div>
           </div>
         </div>
+        </StudentsSheetBody>
       </IOSSheet>
 
       <IOSSheet
@@ -1719,6 +1782,7 @@ export default function StudentsPage({
           danger: true,
         }}
       >
+        <StudentsSheetBody>
         {ruleDeleteTarget ? (
           <div className="space-y-4">
             <div className={cardClass}>
@@ -1732,6 +1796,7 @@ export default function StudentsPage({
             </div>
           </div>
         ) : null}
+        </StudentsSheetBody>
       </IOSSheet>
 
       <IOSSheet
@@ -1748,6 +1813,7 @@ export default function StudentsPage({
           emphasize: true,
         }}
       >
+        <StudentsSheetBody>
         <div className="space-y-3">
           {duplicateList.map((item) => (
             <div key={item.id} className={cardClass}>
@@ -1764,6 +1830,7 @@ export default function StudentsPage({
             </div>
           ))}
         </div>
+        </StudentsSheetBody>
       </IOSSheet>
 
       <IOSSheet
@@ -1791,6 +1858,7 @@ export default function StudentsPage({
           emphasize: true,
         }}
       >
+        <StudentsSheetBody>
         {pendingAction ? (
           <div className="space-y-4">
             <div className={cardClass}>
@@ -1806,12 +1874,14 @@ export default function StudentsPage({
 
             {pendingAction.kind === "deactivate_immediate" ? (
               <div className={cardClass}>
+                <div data-testid="students-danger-action-group">
                 <div className="p-4">
                   <div className="space-y-3 text-[14px] leading-6 text-[#8E8E93]">
                     <div>受影響未來課次數量：{impactedCount ?? "—"}</div>
                     <div>立即停用後，將移除現在之後所有已排課課次。</div>
                     <div>恢復後不會自動還原這些課次。</div>
                   </div>
+                </div>
                 </div>
               </div>
             ) : null}
@@ -1860,6 +1930,7 @@ export default function StudentsPage({
             ) : null}
           </div>
         ) : null}
+        </StudentsSheetBody>
       </IOSSheet>
 
     </div>
